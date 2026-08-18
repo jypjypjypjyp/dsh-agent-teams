@@ -70,7 +70,7 @@ src/client/
 
 - `AgentTeamsCard` 保留在对话流，但按钮依赖 better-sidebar；无宿主时按钮不显示。
 - `dsh-better-sidebar` 为可选宿主；未安装时插件其余能力（工具、成员、任务）完全不受影响。
-- better-sbestor 服务类型通过结构类型访问（不直接 import 其源码），避免强依赖。
+- better-sidebar 服务类型通过结构类型访问（不直接 import 其源码），避免强依赖。
 
 ## 验证计划
 

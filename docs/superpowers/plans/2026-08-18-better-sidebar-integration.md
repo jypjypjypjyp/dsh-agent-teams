@@ -97,7 +97,15 @@ export function ActivityView({ teams, archivedTeams, historic, currentSessionId,
 }
 ```
 
-- [ ] **Step 2: 确保 `ActivityView.tsx` import 只包含当前 `ActivityPanel.tsx` 里内容所需的模块**
+- [ ] **Step 2: 创建占位 CSS（用户已确认的 Task1/3 顺序修正）**
+
+在 Task 3 之前，先复制现有内容样式，保证 Task 1 构建/提交可独立通过：
+
+```bash
+cp src/client/ActivityPanel.module.css src/client/ActivityView.module.css
+```
+
+- [ ] **Step 3: 确保 `ActivityView.tsx` import 只包含当前 `ActivityPanel.tsx` 里内容所需的模块**
 
 ```tsx
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -109,24 +117,32 @@ import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
 import css from './ActivityView.module.css'
 ```
 
-（`ActivityView.module.css` 是 Task 3 创建的；当前 Step 可先用临时文件或直接引用即将创建的名字，构建时再补 CSS。）
-
-- [ ] **Step 3: 删除 `src/client/ActivityPanel.tsx`**
+- [ ] **Step 4: 删除 `src/client/ActivityPanel.tsx`**
 
 `git rm src/client/ActivityPanel.tsx`
 
-- [ ] **Step 4: 运行构建**
+- [ ] **Step 4b: 更新 `src/client/AgentTeamsCard.tsx` 的类型导入**
 
-Run: `pnpm typecheck`
-Expected: 失败于 `ActivityView.tsx` 引用的 CSS 不存在；新增 `ActivityView.module.css`（空或占位）后再通过。
+原 `ActivityPanel.tsx` 删除后，`AgentTeamsCard.tsx` 的 `import type { ActivityTeam } from './ActivityPanel.tsx'` 会失效；改为从 `ActivityView.tsx` 导入（`ActivityView` 会导出/再导出 `ActivityTeam` 类型）：
 
-- [ ] **Step 5: commit**
+```tsx
+import type { ActivityTeam } from './ActivityView.tsx'
+```
+
+`ActivityView.tsx` 需在此任务中 `export type { ActivityTeam, ActivityMember, ActivityTask, ActivityMessage }`（从原 `ActivityPanel.tsx` 迁移）。
+
+- [ ] **Step 5: 运行构建**
+
+Run: `pnpm typecheck && pnpm build`
+Expected: 通过（占位 CSS 已提供全部类名）。
+
+- [ ] **Step 6: commit**
 
 ```bash
-git add src/client/ActivityView.tsx && git rm src/client/ActivityPanel.tsx
+git add src/client/ActivityView.tsx src/client/ActivityView.module.css src/client/AgentTeamsCard.tsx && git rm src/client/ActivityPanel.tsx
 git commit -m "feat(client): extract shared ActivityView from ActivityPanel"
 ```
-（注意：Task 3 会重命名 CSS，此任务 commit 时暂不要求 `ActivityView.module.css` 必须存在；为避免中间失败，可在 Step 4 临时创建占位 CSS，Task 3 再替换。）
+（注意：Task 3 会对 `ActivityView.module.css` 做最终裁剪。）
 
 ---
 
@@ -235,22 +251,52 @@ Run: `cp src/client/ActivityPanel.module.css src/client/ActivityView.module.css`
 - 底部 `@media (prefers-reduced-motion: reduce)` 中浮层专属选择器（保留 `.workGlyph rect`、`.stateArt`、`.memberAvatar[data-unread='true']::after`）
 - `@media (max-width: 960px)` 与 `@media (max-width: 640px)` 中浮层专属部分；保留窄屏对内容区的必要调整（`teamStats span[data-stat='messages']` 隐藏、`.captainNode` 网格列、`.captainState` 隐藏、`.delegationTree`/`.memberBranch`/`.assignmentLine` 边距）。
 - 顶部注释改为 `/* AgentTeams activity view (hosted by the better-sidebar tab). Relationship lines ... */`
+- **保留 token bridge（用户已确认）**：把原 `.badge, .panel` 上的 `--dsw-alias-*` 变量块改为挂在 `.root` 上；`ActivityView.tsx` 返回的最外层元素增加 `className={css.root}`。`ActivityView.module.css` 中新增 `.root { /* token bridge 块 */ }`。
 
-- [ ] **Step 2: 运行 `pnpm typecheck`**
+- [ ] **Step 2: 给 `ActivityView.tsx` 最外层加 `css.root`**
+
+`ActivityView` 的渲染改为：
+
+```tsx
+return (
+  <div className={css.root}>
+    {count === 0 ? <span className={css.emptyHint}>暂无团队活动</span> : (
+      <>
+        {visibleTeams.map((team) => (
+          <TeamSection key={team.teamId} team={team} onNavigate={onNavigate} />
+        ))}
+        {visibleArchived.map((team) => (
+          <div key={`${team.captainSessionId}:${team.teamId}`} data-team-id={team.teamId} data-historic className={css.archivedWrap}>
+            <TeamSection team={team} onNavigate={onNavigate} historic />
+          </div>
+        ))}
+        {visibleHistoric.map(({ data: team, owner }) => {
+          const teamKey = `${owner}:${team.teamId}`
+          return (
+            <TeamSection key={teamKey} team={historicCardTeam(team, owner)} onNavigate={onNavigate} historic />
+          )
+        })}
+      </>
+    )}
+  </div>
+)
+```
+
+- [ ] **Step 3: 运行 `pnpm typecheck`**
 
 Expected: 通过。若 `ActivityView.tsx` 引用了 `css.xxx` 而裁剪后缺失类名，补齐该类名。
 
-- [ ] **Step 3: `git rm src/client/ActivityPanel.module.css`**
+- [ ] **Step 4: `git rm src/client/ActivityPanel.module.css`**
 
 ```bash
 git rm src/client/ActivityPanel.module.css
 ```
 
-- [ ] **Step 4: 运行 `pnpm build`**
+- [ ] **Step 5: 运行 `pnpm build`**
 
 Expected: 构造通过。
 
-- [ ] **Step 5: commit**
+- [ ] **Step 6: commit**
 
 ```bash
 git add src/client/ActivityView.module.css && git rm src/client/ActivityPanel.module.css

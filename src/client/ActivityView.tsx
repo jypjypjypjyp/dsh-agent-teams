@@ -478,22 +478,28 @@ export function ActivityView({ teams, archivedTeams, historic, currentSessionId,
     return <span className={css.emptyHint}>暂无团队活动</span>
   }
   return (
-    <>
-      {visibleTeams.map((team) => (
-        <TeamSection key={team.teamId} team={team} onNavigate={onNavigate} />
-      ))}
-      {visibleArchived.map((team) => (
-        <div key={`${team.captainSessionId}:${team.teamId}`} data-team-id={team.teamId} data-historic className={css.archivedWrap}>
-          <TeamSection team={team} onNavigate={onNavigate} historic />
-        </div>
-      ))}
-      {visibleHistoric.map(({ data: team, owner }) => {
-        const teamKey = `${owner}:${team.teamId}`
-        return (
-          <TeamSection key={teamKey} team={historicCardTeam(team, owner)} onNavigate={onNavigate} historic />
-        )
-      })}
-    </>
+    <div className={css.root}>
+      {count === 0
+        ? <span className={css.emptyHint}>暂无团队活动</span>
+        : (
+          <>
+            {visibleTeams.map((team) => (
+              <TeamSection key={team.teamId} team={team} onNavigate={onNavigate} />
+            ))}
+            {visibleArchived.map((team) => (
+              <div key={`${team.captainSessionId}:${team.teamId}`} data-team-id={team.teamId} data-historic className={css.archivedWrap}>
+                <TeamSection team={team} onNavigate={onNavigate} historic />
+              </div>
+            ))}
+            {visibleHistoric.map(({ data: team, owner }) => {
+              const teamKey = `${owner}:${team.teamId}`
+              return (
+                <TeamSection key={teamKey} team={historicCardTeam(team, owner)} onNavigate={onNavigate} historic />
+              )
+            })}
+          </>
+        )}
+    </div>
   )
 }
 

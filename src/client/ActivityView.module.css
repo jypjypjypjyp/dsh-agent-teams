@@ -1,42 +1,13 @@
-/* AgentTeams top-right command panel. Relationship lines are semantic: captain
-   delegation runs vertically through member rows; task dependencies run left
-   to right by precomputed depth. All surfaces follow DSH design tokens. */
-
-:global(html) {
-  --agent-teams-panel-width: 388px;
-  --agent-teams-panel-top: 64px;
-  --agent-teams-panel-bottom-gap: 64px;
-  --agent-teams-panel-min-height: 560px;
-  /* Follow the better-sidebar plugin's width variable (0 when collapsed or
-     when the plugin is absent), so the panel shifts left of that sidebar
-     instead of overlapping it. The layout shift (--agent-teams-panel-shift)
-     stays constant: both the panel and the conversation column move by the
-     same amount, so their relative position is unchanged. */
-  --agent-teams-panel-right: calc(18px + var(--dsh-sidebar-width, 0px));
-  --agent-teams-panel-gap: 14px;
-  --agent-teams-panel-shift: calc(var(--agent-teams-panel-width) + 18px + var(--agent-teams-panel-gap));
-}
-
-/* The web shell owns no top-right slot. While this body-portal panel is open,
-   its global marker lets only the center conversation column yield room. The
-   sidebar stays anchored; the transcript and sticky composer share one smooth
-   width transition because both live under the same conversation root. */
-:global(html[data-agent-teams-panel-open]) :global([data-phase='active']) {
-  box-sizing: border-box;
-  padding-right: var(--agent-teams-panel-shift);
-}
-
-:global([data-phase='active']) {
-  transition: padding-right 360ms cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: padding-right;
-}
+/* AgentTeams activity view (hosted by the better-sidebar tab). Relationship
+   lines are semantic: captain delegation runs vertically through member rows;
+   task dependencies run left to right by precomputed depth. All surfaces
+   follow DSH design tokens. */
 
 /* The reference export used an older DSW token vocabulary. Harness rc.6
    exposes the same palette through layer/border and primary state tokens.
    Bridge them only inside this plugin surface so every declaration remains
    valid without mutating the host theme globally. */
-.badge,
-.panel {
+.root {
   --dsw-alias-line-normal: var(--dsw-static-neutral-bluish-150, #e7e9ee);
   --dsw-alias-line-strong: color-mix(
     in srgb,
@@ -53,168 +24,13 @@
   --dsw-alias-state-warning: var(--dsw-alias-state-warn-primary, #e08700);
   --dsw-alias-state-danger: var(--dsw-alias-state-error-primary, #e5484d);
   --dsw-alias-label-on-fill: var(--dsw-alias-label-primary-inverted, #ffffff);
-}
 
-.badge {
-  position: fixed;
-  top: var(--agent-teams-panel-top);
-  right: var(--agent-teams-panel-right);
-  z-index: 2147483000;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 34px;
-  padding: 0 12px;
-  box-sizing: border-box;
-  border: 1px solid var(--dsw-alias-line-normal);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) 92%, transparent);
-  backdrop-filter: blur(16px);
-  box-shadow: 0 8px 28px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);
-  color: var(--dsw-alias-label-secondary);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 20px;
-  cursor: pointer;
-  transition: border-color 150ms ease, transform 120ms ease;
-}
-
-.badge:hover {
-  border-color: var(--dsw-alias-line-strong);
-  transform: translateY(-1px);
-}
-
-.badge:active {
-  transform: translateY(0) scale(0.98);
-}
-
-.badge:focus-visible,
-.closeButton:focus-visible,
-.memberRow:focus-visible,
-.membersToggle:focus-visible,
-.sectionToggleTitle:focus-visible,
-.dagNode:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
-}
-
-.badgeDot,
-.panelDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--dsw-alias-label-tertiary);
-}
-
-.badgeDot[data-busy='true'],
-.panelDot[data-busy='true'] {
-  background: var(--dsw-alias-state-business-primary);
-  animation: agentTeamsPulse 1.25s ease-in-out infinite;
-}
-
-.badgeCount,
-.memberCount,
-.teamStats,
-.stageLabel,
-.taskId {
-  font-variant-numeric: tabular-nums;
-}
-
-/* panel shell */
-.panel {
-  position: fixed;
-  top: var(--agent-teams-panel-top);
-  right: var(--agent-teams-panel-right);
-  z-index: 2147483000;
   display: flex;
   flex-direction: column;
-  width: min(var(--agent-teams-panel-width), calc(100vw - 24px));
-  min-height: min(
-    var(--agent-teams-panel-min-height),
-    calc(100dvh - var(--agent-teams-panel-top) - var(--agent-teams-panel-bottom-gap))
-  );
-  max-height: calc(100dvh - var(--agent-teams-panel-top) - var(--agent-teams-panel-bottom-gap));
-  box-sizing: border-box;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-line-strong) 58%, transparent);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--dsw-alias-bg-module) 95%, transparent);
-  backdrop-filter: blur(20px) saturate(1.08);
-  box-shadow:
-    0 12px 32px color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent),
-    0 32px 72px color-mix(in srgb, var(--dsw-alias-label-primary) 16%, transparent);
-  animation: agentTeamsPanelIn 180ms ease-out;
+  gap: 10px;
+  min-width: 0;
 }
 
-@keyframes agentTeamsPanelIn {
-  from { opacity: 0; transform: translateY(-6px) scale(0.99); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@keyframes agentTeamsPulse {
-  0%, 100% { opacity: 0.42; }
-  50% { opacity: 1; }
-}
-
-.panelHead {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 44px;
-  padding: 0 14px 0 16px;
-  border-bottom: 1px solid var(--dsw-alias-line-normal);
-}
-
-.panelTitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--dsw-alias-label-primary);
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.closeButton {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
-}
-
-.closeButton:hover {
-  background: var(--dsw-alias-bg-fill-neutral);
-  color: var(--dsw-alias-label-primary);
-}
-
-.closeButton:active {
-  transform: scale(0.94);
-}
-
-.teams {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-}
-
-.teams::-webkit-scrollbar {
-  display: none;
-}
-
-/* team */
 .team {
   display: flex;
   flex-direction: column;
@@ -1097,11 +913,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :global([data-phase='active']),
-  .panel,
-  .badge,
-  .badgeDot,
-  .panelDot,
   .workGlyph rect,
   .stateArt,
   .memberAvatar[data-unread='true']::after {
@@ -1110,29 +921,7 @@
   }
 }
 
-@media (max-width: 960px) {
-  :global(html) {
-    --agent-teams-main-shift: 0px;
-  }
-
-  :global(html[data-agent-teams-panel-open]) :global([data-phase='active']) {
-    padding-right: 0;
-  }
-}
-
 @media (max-width: 640px) {
-  :global(html) {
-    /* Keep the narrow-screen inset while still clearing the better-sidebar. */
-    --agent-teams-panel-right: calc(10px + var(--dsh-sidebar-width, 0px));
-    --agent-teams-panel-top: 56px;
-    --agent-teams-panel-bottom-gap: 56px;
-  }
-
-  .panel {
-    left: 10px;
-    width: auto;
-  }
-
   .teamStats span[data-stat='messages'] {
     display: none;
   }

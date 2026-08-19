@@ -132,7 +132,7 @@ function WorkGlyph({ active }: { readonly active: boolean }) {
 
 function memberStateLabel(member: ActivityMember, tasks: readonly ActivityTask[], historic: boolean): string {
   const owned = tasks.filter((task) => task.assignee === member.name)
-  if (member.activity === 'working') return '工作中'
+  if (member.activity === 'working' || member.status === 'working') return '工作中'
   if (owned.some((task) => task.status === 'failed')) return '有失败'
   if (owned.some((task) => task.state === 'blocked')) return '等待'
   if (owned.length > 0 && owned.every((task) => task.status === 'completed')) return '已交付'
@@ -145,8 +145,9 @@ function memberStatusText(member: ActivityMember, tasks: readonly ActivityTask[]
   const owned = tasks.filter((task) => task.assignee === member.name)
   const current = owned.find((task) => task.id === member.currentTask)
   const blocked = owned.find((task) => task.state === 'blocked')
-  if (member.activity === 'working' && current !== undefined) return `正在执行 ${current.id}`
-  if (member.activity === 'working') return '正在处理已派任务'
+  const working = member.activity === 'working' || member.status === 'working'
+  if (working && current !== undefined) return `正在执行 ${current.id}`
+  if (working) return '正在处理已派任务'
   if (blocked !== undefined) {
     const dependency = tasks.find((task) => blocked.dependencies.includes(task.id) && task.state !== 'completed')
     if (dependency !== undefined) return `等待 ${dependency.id} · ${dependency.assignee || '待认领'}`

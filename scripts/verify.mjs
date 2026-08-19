@@ -103,8 +103,8 @@ check(
   registeredId === pkg.name,
   `bundle registers ${JSON.stringify(registeredId)}, package.json has ${JSON.stringify(pkg.name)}`,
 )
-const activityPanelCss = await readFile(new URL('../src/client/ActivityPanel.module.css', import.meta.url), 'utf8')
-const activityPanelSource = await readFile(new URL('../src/client/ActivityPanel.tsx', import.meta.url), 'utf8')
+const activityPanelCss = await readFile(new URL('../src/client/ActivityView.module.css', import.meta.url), 'utf8')
+const activityPanelSource = await readFile(new URL('../src/client/ActivityView.tsx', import.meta.url), 'utf8')
 const requiredHarnessTokenBridges = [
   '--dsw-alias-line-normal: var(--dsw-static-neutral-bluish-150',
   '--dsw-alias-bg-module: var(--dsw-alias-bg-layer-1',
@@ -113,20 +113,19 @@ const requiredHarnessTokenBridges = [
   '--dsw-alias-state-danger: var(--dsw-alias-state-error-primary',
 ]
 check(
-  'activity panel bridges the reference palette to current Harness tokens',
+  'activity view bridges the reference palette to current Harness tokens',
   requiredHarnessTokenBridges.every(token => activityPanelCss.includes(token)),
   'missing token bridges make panel fills and DAG borders transparent',
 )
-const requiredPanelSizing = [
-  '--agent-teams-panel-min-height: 560px',
-  'min-height: min(',
-  'max-height: calc(100dvh - var(--agent-teams-panel-top) - var(--agent-teams-panel-bottom-gap))',
+const requiredActivityViewSizing = [
+  '.dagEdges path {',
+  '.dagCanvas {',
+  '.team {',
 ]
 check(
-  'activity panel grows between a stable minimum and balanced viewport maximum',
-  requiredPanelSizing.every(rule => activityPanelCss.includes(rule))
-    && !activityPanelCss.includes('height: min(560px'),
-  'a fixed panel height leaves excessive space below tall viewports',
+  'activity view keeps the compact DAG and team layout styles',
+  requiredActivityViewSizing.every(rule => activityPanelCss.includes(rule)),
+  'activity view missing DAG/team layout rules',
 )
 check(
   'running DAG tasks reuse the animated work glyph without losing focus context',

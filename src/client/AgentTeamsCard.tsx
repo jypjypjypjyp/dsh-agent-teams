@@ -2,11 +2,8 @@
  * AgentTeams conversation card: the lightweight in-conversation summary for
  * one team — the captain's whale avatar and name, the member roster as
  * clickable whale avatars (opening the member's subagent transcript), and
- * an "activity panel" button that re-activates the top-right floater.
- *
- * The floater and this card share the `agent-teams:open-panel` window event
- * so the card can summon the panel even after it was closed (or when an old
- * session is re-opened for review).
+ * an "AgentTeams" button that opens the better-sidebar AgentTeams tab when
+ * dsh-better-sidebar is loaded.
  * @module dsh-agent-teams/client/card
  */
 
@@ -17,9 +14,6 @@ import type { ActivityTeam } from './ActivityView.tsx'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
 import { LEAD_ART, memberArtUrl } from './artwork.ts'
 import css from './AgentTeamsCard.module.css'
-
-/** Window event name the floater listens for to open itself. */
-export const OPEN_PANEL_EVENT = 'agent-teams:open-panel'
 
 /** Navigation action injected from the plugin's own SessionsService access. */
 export interface AgentTeamsCardInjected {
@@ -36,22 +30,8 @@ export type AgentTeamsCardProps =
   & PropsLocale<'agentTeams'>
   & AgentTeamsCardInjected
 
-/** Re-activate the top-right activity panel, carrying this team's summary
- * so the panel can show it even when the team no longer exists on disk
- * (historical session review). */
-function openActivityPanel(data: AgentTeamsCardData): void {
-  window.dispatchEvent(new CustomEvent(OPEN_PANEL_EVENT, {
-    detail: {
-      teamId: data.teamId,
-      captainSessionId: data.captainSessionId,
-      teamName: data.teamName,
-      members: data.members,
-    },
-  }))
-}
-
 /** Render one durable team as a compact conversation card. */
-export function AgentTeamsCard({ node, openSession, currentSessionId }: AgentTeamsCardProps) {
+export function AgentTeamsCard({ node, openSession, currentSessionId, openAgentTeamsTab }: AgentTeamsCardProps) {
   const data = node.data as AgentTeamsCardData
   const owner = data.captainSessionId || currentSessionId() || ''
   const [snapshot, setSnapshot] = useState<ActivityTeam | undefined>()
@@ -94,15 +74,17 @@ export function AgentTeamsCard({ node, openSession, currentSessionId }: AgentTea
         <img className={css.leadAvatar} src={LEAD_ART} alt="" aria-hidden />
         <span className={css.teamName} title={resolved.teamName}>{resolved.teamName}</span>
         <span className={css.memberCount}>{resolved.members.length} 名成员</span>
-        <button
-          type="button"
-          className={css.panelButton}
-          onClick={() => { openActivityPanel(resolved) }}
-          aria-label="打开活动面板"
-          title="打开活动面板"
-        >
-          活动面板
-        </button>
+        {openAgentTeamsTab !== undefined && (
+          <button
+            type="button"
+            className={css.panelButton}
+            onClick={() => { openAgentTeamsTab() }}
+            aria-label="打开 AgentTeams"
+            title="打开 AgentTeams"
+          >
+            AgentTeams
+          </button>
+        )}
       </header>
       {resolved.members.length > 0 && (
         <div className={css.members}>

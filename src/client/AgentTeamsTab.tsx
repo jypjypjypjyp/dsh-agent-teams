@@ -7,7 +7,7 @@
  * @module dsh-agent-teams/client/tab
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { ActivityView, type ActivityTeam } from './ActivityView.tsx'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
@@ -15,6 +15,21 @@ import { STATE_URL, ARCHIVED_URL } from './agent-teams-tab-constants.ts'
 
 /** Poll cadence for the host snapshot route. */
 const POLL_MS = 1000
+
+/** Tiny module-level count store for the sidebar tab badge. The badge
+ * callback is synchronous and runs during tab-bar renders; polling results
+ * flow in asynchronously from AgentTeamsTab, so the latest value is stored
+ * here. The sidebar tab is single-instance per session, and DSH uses one
+ * client bundle per activated plugin — module state is safe. */
+let agentTeamsTabCount = 0
+
+export function setAgentTeamsTabCount(count: number): void {
+  agentTeamsTabCount = count
+}
+
+export function agentTeamsTabBadge(): number {
+  return agentTeamsTabCount
+}
 
 /** Props supplied by the better-sidebar tab renderer (structural subset). */
 export interface AgentTeamsTabProps {
@@ -31,6 +46,13 @@ export function AgentTeamsTab(props: AgentTeamsTabProps) {
   // 历史卡片旧数据不再通过窗口事件注入；归档团队由 archivedTeams 快照覆盖。
   // visibleHistoric 保留原 ActivityView 的能力，但实际值为空 map。
   const [historic] = useState<ReadonlyMap<string, { data: AgentTeamsCardData; owner: string }>>(new Map())
+
+  // Latest snapshot state mirrored into refs so the poll interval closure
+  // never reads a stale render's state.
+  const teamsRef = useRef(teams)
+  const archivedTeamsRef = useRef(archivedTeams)
+  teamsRef.current = teams
+  archivedTeamsRef.current = archivedTeams
 
   const sessions = runtime.sessions
   const current = useSyncExternalStore(
@@ -51,13 +73,29 @@ export function AgentTeamsTab(props: AgentTeamsTabProps) {
           fetch(STATE_URL, { cache: 'no-store' }),
           fetch(ARCHIVED_URL, { cache: 'no-store' }),
         ])
+        let nextTeams = teamsRef.current
+        let nextArchived = archivedTeamsRef.current
         if (liveResponse.ok) {
           const body = (await liveResponse.json()) as { teams?: unknown }
-          if (!cancelled && Array.isArray(body.teams)) setTeams(body.teams as readonly ActivityTeam[])
+          if (!cancelled && Array.isArray(body.teams)) {
+            nextTeams = body.teams as readonly ActivityTeam[]
+            setTeams(nextTeams)
+            teamsRef.current = nextTeams
+          }
         }
         if (archivedResponse.ok) {
           const body = (await archivedResponse.json()) as { teams?: unknown }
-          if (!cancelled && Array.isArray(body.teams)) setArchivedTeams(body.teams as readonly ActivityTeam[])
+          if (!cancelled && Array.isArray(body.teams)) {
+            nextArchived = body.teams as readonly ActivityTeam[]
+            setArchivedTeams(nextArchived)
+            archivedTeamsRef.current = nextArchived
+          }
+        }
+        if (!cancelled) {
+          const visibleCount =
+            nextTeams.filter((team) => team.captainSessionId === current).length
+            + nextArchived.filter((team) => team.captainSessionId === current).length
+          setAgentTeamsTabCount(visibleCount)
         }
       } catch {
         // Host restarting; keep the last snapshot.

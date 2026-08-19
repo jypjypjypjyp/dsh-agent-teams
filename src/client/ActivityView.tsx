@@ -1,28 +1,14 @@
 /**
- * AgentTeams activity panel: the top-right floater monitoring every team.
- *
- * Modeled on the Claude Code desktop SessionActivityPanel: a fixed glass
- * panel at the top-right corner. On wide viewports it cooperatively makes the
- * conversation column yield space; narrow viewports keep overlay mode. It
- * polls the host `/plugins/dsh-agent-teams/state` route for
- * server-side snapshots (durable files + live subagent activity), with a
- * collapsed badge that auto-expands once when activity appears. Archived
- * teams stay available for the owning conversation after live work ends.
- *
- * The floater mounts through a body portal (no top-right slot exists in the
- * web shell); it is not a conversation node — the in-conversation panel was
- * removed in favor of this always-available monitor.
- * @module dsh-agent-teams/client/activity
+ * AgentTeams activity view: session-scoped team contents rendered inside a
+ * host tab (the better-sidebar AgentTeams tab). Pure presentation — polling
+ * and session ownership live in the host tab wrapper.
+ * @module dsh-agent-teams/client/activity-view
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import {
-  IconBranchOutline16, IconCloseOutline16,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { IconBranchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import {
-  activityPanelExpandedForSession,
   compactDagLayout,
   COMPACT_DAG_NODE_HEIGHT,
   COMPACT_DAG_NODE_WIDTH,
@@ -31,24 +17,8 @@ import {
   usesParallelTaskGrid,
 } from './activity-model.ts'
 import { ACTION_ART, LEAD_ART, memberArtUrl } from './artwork.ts'
-import { OPEN_PANEL_EVENT } from './AgentTeamsCard.tsx'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
-import css from './ActivityPanel.module.css'
-
-/** Poll cadence for the host snapshot route. */
-const POLL_MS = 1000
-/** Grace before the panel collapses once no team remains. */
-const AUTOCLOSE_GRACE_MS = 2000
-/**
- * Page-settle window after mount: activity restored on page load only shows
- * the collapsed badge, so the panel never yanks the conversation column
- * right after load. New activity after this window auto-expands as usual.
- */
-const AUTO_OPEN_SETTLE_MS = 4000
-/** Host route serving team snapshots. */
-const STATE_URL = '/plugins/dsh-agent-teams/state'
-/** Root marker shared with the panel CSS while the portal is expanded. */
-const PANEL_OPEN_ATTRIBUTE = 'data-agent-teams-panel-open'
+import css from './ActivityView.module.css'
 
 /** One member row of a host snapshot. */
 export interface ActivityMember {
@@ -159,19 +129,6 @@ function WorkGlyph({ active }: { readonly active: boolean }) {
   )
 }
 
-/** Collapsed badge: an always-visible corner pill while any team exists. */
-function CollapsedBadge({ count, busy, onClick }: {
-  readonly count: number
-  readonly busy: boolean
-  readonly onClick: () => void
-}) {
-  return (
-    <button type="button" className={css.badge} data-busy={busy} onClick={onClick} aria-label={`AgentTeams 活动，${count} 个团队`}>
-      <span className={css.badgeDot} data-busy={busy} aria-hidden />
-      <span className={css.badgeCount}>{count}</span>
-    </button>
-  )
-}
 
 function memberStateLabel(member: ActivityMember, tasks: readonly ActivityTask[], historic: boolean): string {
   const owned = tasks.filter((task) => task.assignee === member.name)
@@ -501,230 +458,42 @@ function historicCardTeam(data: AgentTeamsCardData, owner: string): ActivityTeam
   }
 }
 
-/** The top-right activity floater. Teams follow the current session: live
- * snapshots and historic card summaries are only shown while their captain
- * session is the one currently open. */
-export function ActivityPanel({ sessionsList, openSession }: {
-  readonly sessionsList: ObservableSnapshot<SessionListState>
-  readonly openSession: (id: SessionId) => void
+/** Render team contents for the current session's host tab. */
+export function ActivityView({ teams, archivedTeams, historic, currentSessionId, onNavigate }: {
+  readonly teams: readonly ActivityTeam[]
+  readonly archivedTeams: readonly ActivityTeam[]
+  readonly historic: ReadonlyMap<string, { data: AgentTeamsCardData; owner: string }>
+  readonly currentSessionId: SessionId | undefined
+  readonly onNavigate: (id: SessionId) => void
 }) {
-  // Navigating to a member's subagent transcript is an explicit departure:
-  // hide the floater immediately instead of waiting out the autocollapse
-  // grace, so the panel never lingers over the member session.
-  const navigateToSession = (id: SessionId): void => {
-    setOpen(false)
-    setWasActive(false)
-    openSession(id)
+  const visibleTeams = teams.filter((team) => team.captainSessionId === currentSessionId)
+  const visibleArchived = archivedTeams.filter((team) => team.captainSessionId === currentSessionId)
+  const visibleHistoric = [...historic.values()].filter(({ data, owner }) =>
+    owner === currentSessionId
+      && !visibleTeams.some((live) => live.teamId === data.teamId)
+      && !visibleArchived.some((archived) => archived.teamId === data.teamId)
+  )
+  const count = visibleTeams.length + visibleArchived.length + visibleHistoric.length
+  if (count === 0) {
+    return <span className={css.emptyHint}>暂无团队活动</span>
   }
-  const [teams, setTeams] = useState<readonly ActivityTeam[]>([])
-  const [archivedTeams, setArchivedTeams] = useState<readonly ActivityTeam[]>([])
-  const [open, setOpen] = useState(false)
-  const [openOwner, setOpenOwner] = useState<SessionId | undefined>()
-  const [autoOpened, setAutoOpened] = useState(false)
-  const [wasActive, setWasActive] = useState(false)
-  const [historic, setHistoric] = useState<ReadonlyMap<string, { data: AgentTeamsCardData; owner: string }>>(new Map())
-  const current = useSyncExternalStore(
-    sessionsList.subscribe,
-    sessionsList.getSnapshot,
-  ).current
-  const currentRef = useRef(current)
-  useEffect(() => { currentRef.current = current }, [current])
-  const mountedAtRef = useRef(performance.now())
-  const expanded = activityPanelExpandedForSession(open, openOwner, current)
-
-  // This portal survives conversation route changes. Gate expansion by its
-  // owning session during render, then clear stale state before paint. This
-  // removes the old panel immediately instead of waiting for the no-team
-  // autoclose grace period on the destination page.
-  useLayoutEffect(() => {
-    if (openOwner === undefined || openOwner === current) return
-    setOpen(false)
-    setOpenOwner(undefined)
-    setWasActive(false)
-    setAutoOpened(false)
-  }, [current, openOwner])
-
-  // The activity panel is a body portal, so announce its open state on body.
-  // CSS can then make the conversation column yield space without knowing the
-  // host shell's hashed module class names. Narrow viewports keep overlay mode.
-  useLayoutEffect(() => {
-    const root = document.documentElement
-    if (expanded) root.setAttribute(PANEL_OPEN_ATTRIBUTE, '')
-    else root.removeAttribute(PANEL_OPEN_ATTRIBUTE)
-    return () => { root.removeAttribute(PANEL_OPEN_ATTRIBUTE) }
-  }, [expanded])
-
-  useEffect(() => {
-    let cancelled = false
-    let inFlight = false
-    const tick = async (): Promise<void> => {
-      if (inFlight || cancelled) return
-      inFlight = true
-      try {
-        const [liveResponse, archivedResponse] = await Promise.all([
-          fetch(STATE_URL, { cache: 'no-store' }),
-          fetch(`${STATE_URL}?archived=1`, { cache: 'no-store' }),
-        ])
-        if (liveResponse.ok) {
-          const body = (await liveResponse.json()) as { teams?: unknown }
-          if (!cancelled && Array.isArray(body.teams)) setTeams(body.teams as readonly ActivityTeam[])
-        }
-        if (archivedResponse.ok) {
-          const body = (await archivedResponse.json()) as { teams?: unknown }
-          if (!cancelled && Array.isArray(body.teams)) setArchivedTeams(body.teams as readonly ActivityTeam[])
-        }
-      } catch {
-        // Host restarting; keep the last snapshot.
-      } finally {
-        inFlight = false
-      }
-    }
-    void tick()
-    const timer = setInterval(() => { void tick() }, POLL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [])
-
-  useEffect(() => {
-    const onOpenPanel = (event: Event): void => {
-      const activeSession = currentRef.current
-      if (activeSession === undefined) return
-      setOpenOwner(activeSession)
-      setOpen(true)
-      const detail = (event as CustomEvent<AgentTeamsCardData>).detail
-      if (detail?.teamId !== undefined) {
-        // A card from a log that predates captainSessionId belongs to the
-        // session that activated it (the current one at injection time).
-        const owner = detail.captainSessionId !== '' ? detail.captainSessionId : currentRef.current ?? ''
-        const teamKey = `${owner}:${detail.teamId}`
-        setHistoric((previous) => {
-          const next = new Map(previous)
-          next.set(teamKey, { data: detail, owner })
-          return next
-        })
-      }
-    }
-    window.addEventListener(OPEN_PANEL_EVENT, onOpenPanel)
-    return () => {
-      window.removeEventListener(OPEN_PANEL_EVENT, onOpenPanel)
-    }
-  }, [])
-
-  // Teams follow the current session: live snapshots and historic card
-  // summaries are visible only while their captain session is current.
-  const visibleTeams = useMemo(
-    // No current session (initial load): show nothing until one is picked,
-    // so cross-session teams never leak into the floater.
-    () => (current === undefined ? [] : teams.filter((team) => team.captainSessionId === current)),
-    [teams, current],
-  )
-  const visibleHistoric = useMemo(
-    () => (current === undefined ? [] : [...historic.values()].filter(({ data, owner }) =>
-      owner === current && !teams.some((live) =>
-        live.captainSessionId === current && live.teamId === data.teamId,
-      ) && !archivedTeams.some((archived) =>
-        archived.captainSessionId === current && archived.teamId === data.teamId,
-      ),
-    )),
-    [historic, current, teams, archivedTeams],
-  )
-  const visibleArchived = useMemo(
-    () => (current === undefined ? [] : archivedTeams.filter((team) =>
-      team.captainSessionId === current && !teams.some((live) =>
-        live.captainSessionId === current && live.teamId === team.teamId,
-      ),
-    )),
-    [archivedTeams, current, teams],
-  )
-  const visibleCount = visibleTeams.length + visibleArchived.length + visibleHistoric.length
-
-  useEffect(() => {
-    if (visibleCount > 0) {
-      setWasActive(true)
-      // Auto-expand only after the page-settle window: opening (and its
-      // main-column yield) right after load reads as a whole-page flicker.
-      const settled = performance.now() - mountedAtRef.current >= AUTO_OPEN_SETTLE_MS
-      if (!autoOpened && settled) {
-        setOpenOwner(current)
-        setOpen(true)
-        setAutoOpened(true)
-      }
-      return
-    }
-    if (!wasActive) return
-    const timer = setTimeout(() => {
-      setOpen(false)
-      setOpenOwner(undefined)
-      setWasActive(false)
-      // Re-arm auto-expand: a later activity (new team, new session) may
-      // open the panel on its own again.
-      setAutoOpened(false)
-    }, AUTOCLOSE_GRACE_MS)
-    return () => { clearTimeout(timer) }
-  }, [visibleCount, autoOpened, wasActive])
-
-  const busy = useMemo(
-    () => visibleTeams.some((team) => team.members.some((member) => member.activity === 'working')),
-    [visibleTeams],
-  )
-  const hasTeams = visibleCount > 0
-
-  if (!hasTeams && !expanded) return null
-
   return (
     <>
-      {!expanded && (
-        <CollapsedBadge count={visibleCount} busy={busy} onClick={() => {
-          if (current === undefined) return
-          setOpenOwner(current)
-          setOpen(true)
-        }} />
-      )}
-      {expanded && (
-        <aside className={css.panel} data-agent-teams-activity>
-          <header className={css.panelHead}>
-            <span className={css.panelTitle}>
-              AgentTeams 活动
-              <span className={css.panelDot} data-busy={busy} aria-hidden />
-            </span>
-            <button
-              type="button"
-              className={css.closeButton}
-              onClick={() => {
-                setOpen(false)
-                setOpenOwner(undefined)
-              }}
-              aria-label="关闭"
-            >
-              <IconCloseOutline16 />
-            </button>
-          </header>
-          <div className={css.teams}>
-            {visibleCount === 0
-              ? <span className={css.emptyHint}>暂无团队活动</span>
-              : (
-                <>
-                  {visibleTeams.map((team) => (
-                    <TeamSection key={team.teamId} team={team} onNavigate={navigateToSession} />
-                  ))}
-                  {visibleArchived.map((team) => (
-                    <div key={`${team.captainSessionId}:${team.teamId}`} data-team-id={team.teamId} data-historic className={css.archivedWrap}>
-                      <TeamSection team={team} onNavigate={navigateToSession} historic />
-                    </div>
-                  ))}
-                  {visibleHistoric.map(({ data: team, owner }) => {
-                    const teamKey = `${owner}:${team.teamId}`
-                    return (
-                      <TeamSection key={teamKey} team={historicCardTeam(team, owner)} onNavigate={navigateToSession} historic />
-                    )
-                  })}
-                </>
-              )}
-          </div>
-        </aside>
-      )}
+      {visibleTeams.map((team) => (
+        <TeamSection key={team.teamId} team={team} onNavigate={onNavigate} />
+      ))}
+      {visibleArchived.map((team) => (
+        <div key={`${team.captainSessionId}:${team.teamId}`} data-team-id={team.teamId} data-historic className={css.archivedWrap}>
+          <TeamSection team={team} onNavigate={onNavigate} historic />
+        </div>
+      ))}
+      {visibleHistoric.map(({ data: team, owner }) => {
+        const teamKey = `${owner}:${team.teamId}`
+        return (
+          <TeamSection key={teamKey} team={historicCardTeam(team, owner)} onNavigate={onNavigate} historic />
+        )
+      })}
     </>
   )
 }
+

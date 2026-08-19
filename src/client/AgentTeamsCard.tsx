@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ActivityTeam } from './ActivityPanel.tsx'
+import type { ActivityTeam } from './ActivityView.tsx'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
 import { LEAD_ART, memberArtUrl } from './artwork.ts'
 import css from './AgentTeamsCard.module.css'

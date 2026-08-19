@@ -6,7 +6,7 @@ import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/c
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AgentTeamsCard, type AgentTeamsCardInjected } from './AgentTeamsCard.tsx'
 import { agentTeamsCardDefinition } from './agent-teams-card-definition.ts'
-import { AgentTeamsTab, agentTeamsTabBadge, setAgentTeamsTabCard } from './AgentTeamsTab.tsx'
+import { AgentTeamsTab, agentTeamsTabBadge } from './AgentTeamsTab.tsx'
 import { AGENT_TEAMS_TAB_ID } from './agent-teams-tab-constants.ts'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
 import type { BetterSidebarService } from './better-sidebar.d.ts'
@@ -48,8 +48,10 @@ export function apply(ctx: ClientContext): void {
       openAgentTeamsTab: sidebarUsable
         ? (data: AgentTeamsCardData) => {
           const owner = data.captainSessionId !== '' ? data.captainSessionId : ctx.sessions.list.getSnapshot().current ?? ''
-          setAgentTeamsTabCard(data, owner)
-          betterSidebar?.openTab({ type: AGENT_TEAMS_TAB_ID })
+          betterSidebar?.openTab({
+            type: AGENT_TEAMS_TAB_ID,
+            meta: { data, owner },
+          })
         }
         : undefined,
     }),

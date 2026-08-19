@@ -35,31 +35,22 @@ export function agentTeamsTabBadge(): number {
   return agentTeamsTabCount
 }
 
-/** Tiny module-level store for the last conversation-card summary opened with
- * the "AgentTeams" button. The tab consumes it to reconstruct historic teams
- * whose archive snapshot may not exist yet (or whose captainSessionId predates
- * durable archive data). */
-let agentTeamsTabCard: { data: AgentTeamsCardData; owner: string } | undefined
-
-export function setAgentTeamsTabCard(data: AgentTeamsCardData, owner: string): void {
-  agentTeamsTabCard = { data, owner }
-}
-
-export function takeAgentTeamsTabCard(): { data: AgentTeamsCardData; owner: string } | undefined {
-  const card = agentTeamsTabCard
-  agentTeamsTabCard = undefined
-  return card
-}
-
 /** Props supplied by the better-sidebar tab renderer (structural subset). */
 export interface AgentTeamsTabProps {
   ctx: unknown
   scope: { sessionId: string; cwd?: string }
+  tab: { id: string; type: string; title: string; meta?: unknown }
   visible: boolean
 }
 
+/** The card summary carried through openTab's `meta` seed. */
+export interface AgentTeamsCardMeta {
+  data: AgentTeamsCardData
+  owner: string
+}
+
 export function AgentTeamsTab(props: AgentTeamsTabProps) {
-  const { ctx, scope, visible } = props
+  const { ctx, scope, tab, visible } = props
   const runtime = ctx as ClientContext
   const [teams, setTeams] = useState<readonly ActivityTeam[]>([])
   const [archivedTeams, setArchivedTeams] = useState<readonly ActivityTeam[]>([])
@@ -83,19 +74,20 @@ export function AgentTeamsTab(props: AgentTeamsTabProps) {
     ? globalCurrent
     : scope.sessionId as SessionId
 
-  // A card opened via the "AgentTeams" button should be visible in the tab
-  // even if its archive snapshot is not yet present. Seed historic once when
-  // the card arrives.
+  // A card opened via the "AgentTeams" button carries its summary through
+  // openTab's `meta`. When the tab later (re)mounts or receives a new seed,
+  // add it to the historic map so the ActivityView can render the summary
+  // even before the archive route has it.
   useEffect(() => {
-    const card = takeAgentTeamsTabCard()
-    if (card === undefined) return
+    const meta = tab.meta as AgentTeamsCardMeta | undefined
+    if (meta?.data?.teamId === undefined || meta?.owner === undefined) return
     setHistoric((previous) => {
-      const key = `${card.owner}:${card.data.teamId}`
+      const key = `${meta.owner}:${meta.data.teamId}`
       const next = new Map(previous)
-      next.set(key, card)
+      next.set(key, { data: meta.data, owner: meta.owner })
       return next
     })
-  }, [])
+  }, [tab.meta])
 
   // Reset the badge whenever the tab is hidden, no session is active, or the
   // active session changes. A stale earlier count must never survive these

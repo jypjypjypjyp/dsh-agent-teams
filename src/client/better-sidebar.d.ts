@@ -45,7 +45,7 @@ export interface BetterSidebarTabDescriptor {
     ctx: unknown
     store: unknown
     scope: { sessionId: string; cwd?: string }
-    tab: { id: string; type: string; title: string }
+    tab: { id: string; type: string; title: string; meta?: unknown }
     visible: boolean
   }) => ReactNode
 }

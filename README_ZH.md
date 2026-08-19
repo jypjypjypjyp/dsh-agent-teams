@@ -40,6 +40,8 @@
 
 > [!NOTE]
 > 实时活动面板托管在 [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) 的 AgentTeams tab 中。安装 `dsh-better-sidebar`（v0.13+）后才会显示该 tab 与卡片内按钮；未安装时协作工具、对话卡片与持久化状态仍可用，只是不显示侧栏面板与按钮。
+>
+> 本包**刻意不**在 package.json 中声明 `dsh-better-sidebar` 为 npm peer 依赖：它是通过 `ctx.get('betterSidebar')` 探测的可选运行时宿主，声明 peer 会触发 pnpm auto-install-peers 把 node-pty 等原生构建加入本项目 lockfile。运行时契约见 `src/client/better-sidebar.d.ts` 的结构类型。
 
 ### npm
 

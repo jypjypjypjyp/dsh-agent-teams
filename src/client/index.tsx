@@ -6,8 +6,9 @@ import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/c
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AgentTeamsCard, type AgentTeamsCardInjected } from './AgentTeamsCard.tsx'
 import { agentTeamsCardDefinition } from './agent-teams-card-definition.ts'
-import { AgentTeamsTab, agentTeamsTabBadge } from './AgentTeamsTab.tsx'
+import { AgentTeamsTab, agentTeamsTabBadge, setAgentTeamsTabCard } from './AgentTeamsTab.tsx'
 import { AGENT_TEAMS_TAB_ID } from './agent-teams-tab-constants.ts'
+import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
 import type { BetterSidebarService } from './better-sidebar.d.ts'
 
 /** Required services: conversation nodes, slots, and sessions navigation. */
@@ -21,9 +22,12 @@ export const inject = ['conversationEvents', 'slots', 'sessions']
  */
 export function apply(ctx: ClientContext): void {
   const betterSidebar = (ctx as { get?: <T>(key: string) => T | undefined }).get?.<BetterSidebarService | undefined>('betterSidebar')
+  const sidebarUsable = betterSidebar !== undefined
+    && typeof betterSidebar.registerTab === 'function'
+    && typeof betterSidebar.openTab === 'function'
 
-  if (betterSidebar !== undefined) {
-    const disposer = betterSidebar.registerTab({
+  if (sidebarUsable) {
+    const disposer = betterSidebar!.registerTab({
       id: AGENT_TEAMS_TAB_ID,
       title: 'AgentTeams',
       order: 35,
@@ -41,8 +45,12 @@ export function apply(ctx: ClientContext): void {
     inject: (): AgentTeamsCardInjected => ({
       openSession: (id: SessionId) => { ctx.sessions.open(id) },
       currentSessionId: () => ctx.sessions.list.getSnapshot().current,
-      openAgentTeamsTab: betterSidebar !== undefined
-        ? () => { betterSidebar?.openTab({ type: AGENT_TEAMS_TAB_ID }) }
+      openAgentTeamsTab: sidebarUsable
+        ? (data: AgentTeamsCardData) => {
+          const owner = data.captainSessionId !== '' ? data.captainSessionId : ctx.sessions.list.getSnapshot().current ?? ''
+          setAgentTeamsTabCard(data, owner)
+          betterSidebar?.openTab({ type: AGENT_TEAMS_TAB_ID })
+        }
         : undefined,
     }),
   }, AgentTeamsCard))

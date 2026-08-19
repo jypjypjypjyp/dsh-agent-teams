@@ -19,9 +19,9 @@ import css from './AgentTeamsCard.module.css'
 export interface AgentTeamsCardInjected {
   readonly openSession: (id: SessionId) => void
   readonly currentSessionId: () => SessionId | undefined
-  /** Present only when dsh-better-sidebar is loaded; wires the card button
-   *  to open the AgentTeams tab. */
-  readonly openAgentTeamsTab?: () => void
+  /** Present only when dsh-better-sidebar is loaded; opens the AgentTeams tab
+   *  and feeds this card's team summary so historic review can show it. */
+  readonly openAgentTeamsTab?: (data: AgentTeamsCardData) => void
 }
 
 /** Complete keyed Chat renderer props. */
@@ -78,7 +78,7 @@ export function AgentTeamsCard({ node, openSession, currentSessionId, openAgentT
           <button
             type="button"
             className={css.panelButton}
-            onClick={() => { openAgentTeamsTab() }}
+            onClick={() => { openAgentTeamsTab(resolved) }}
             aria-label="打开 AgentTeams"
             title="打开 AgentTeams"
           >

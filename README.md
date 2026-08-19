@@ -40,6 +40,8 @@ Ask in natural language. The plugin provides the team protocol, ten coordination
 
 > [!NOTE]
 > The live activity panel is hosted inside the [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) tab. Install `dsh-better-sidebar` (v0.13+) to see the AgentTeams tab and the in-card button. Without it the coordination tools, conversation card, and durable state still work — only the visual tab and its button are hidden.
+>
+> This package intentionally does **not** declare `dsh-better-sidebar` as an npm peer dependency: it is an optional runtime host probed via `ctx.get('betterSidebar')`, and declaring it would force pnpm's auto-install-peers to add node-pty/native builds to this project's lockfile. The runtime contract is the structural service described in `src/client/better-sidebar.d.ts`.
 
 ### npm
 

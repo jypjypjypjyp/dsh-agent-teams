@@ -331,7 +331,7 @@ function DependencyMap({ tasks }: { readonly tasks: readonly ActivityTask[] }) {
 
 function TeamSection({ team, onNavigate, historic = false }: {
   readonly team: ActivityTeam
-  /** Navigate to a member transcript (floater hides immediately). */
+  /** Navigate to a member transcript (opens the member's subagent session). */
   readonly onNavigate: (id: SessionId) => void
   readonly historic?: boolean
 }) {
@@ -474,9 +474,6 @@ export function ActivityView({ teams, archivedTeams, historic, currentSessionId,
       && !visibleArchived.some((archived) => archived.teamId === data.teamId)
   )
   const count = visibleTeams.length + visibleArchived.length + visibleHistoric.length
-  if (count === 0) {
-    return <span className={css.emptyHint}>暂无团队活动</span>
-  }
   return (
     <div className={css.root} data-agent-teams-activity>
       {count === 0

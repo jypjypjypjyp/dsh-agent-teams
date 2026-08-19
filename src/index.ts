@@ -144,7 +144,7 @@ export function apply(ctx: Context, config: Config): void {
     if (webServer === undefined || workspaceRegistry === undefined) return
     webRegistered = true
 
-    // Activity panel data route: the browser floater polls this for team
+    // Activity panel data route: the AgentTeams tab polls this for team
     // snapshots (disk truth + live subagent activity). Mirrors the Claude
     // Code desktop watcher's server-side snapshot pattern.
     ctx.effect(() => webServer.register({

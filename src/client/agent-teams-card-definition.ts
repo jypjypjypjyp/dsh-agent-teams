@@ -1,9 +1,8 @@
 /**
  * AgentTeams conversation card: a lightweight in-conversation summary shown
  * when a team is created — the captain's name, the member roster with whale
- * avatars, and an entry point that re-activates the top-right activity
- * panel (useful after the floater was closed, or when re-opening an old
- * session for review).
+ * avatars, and an entry point that opens the AgentTeams tab in
+ * dsh-better-sidebar (useful while reviewing an old session).
  *
  * The fold anchors to the Harness's durable `tool/call` + `tool/result`
  * records for `agent_teams_create`. Those are first-party session events, so

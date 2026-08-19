@@ -1,9 +1,9 @@
 /**
  * AgentTeams better-sidebar tab: hosts the shared ActivityView inside the
  * better-sidebar AgentTeams tab. Polls the host snapshot routes only while
- * the tab is actually visible (active tab + open panel); keeps the current
- * session from the runtime sessions list and passes it to ActivityView for
- * session-scoped filtering.
+ * the tab is actually visible (active tab + open panel); resolves the active
+ * session from the sidebar scope (falling back to the runtime sessions list)
+ * and passes it to ActivityView for session-scoped filtering.
  * @module dsh-agent-teams/client/tab
  */
 
@@ -20,7 +20,11 @@ const POLL_MS = 1000
  * callback is synchronous and runs during tab-bar renders; polling results
  * flow in asynchronously from AgentTeamsTab, so the latest value is stored
  * here. The sidebar tab is single-instance per session, and DSH uses one
- * client bundle per activated plugin — module state is safe. */
+ * client bundle per activated plugin — module state is safe.
+ *
+ * The count is reset to 0 whenever the tab is hidden or the active session
+ * changes, so a stale count from a previous session can never leak onto the
+ * badge. */
 let agentTeamsTabCount = 0
 
 export function setAgentTeamsTabCount(count: number): void {
@@ -31,6 +35,22 @@ export function agentTeamsTabBadge(): number {
   return agentTeamsTabCount
 }
 
+/** Tiny module-level store for the last conversation-card summary opened with
+ * the "AgentTeams" button. The tab consumes it to reconstruct historic teams
+ * whose archive snapshot may not exist yet (or whose captainSessionId predates
+ * durable archive data). */
+let agentTeamsTabCard: { data: AgentTeamsCardData; owner: string } | undefined
+
+export function setAgentTeamsTabCard(data: AgentTeamsCardData, owner: string): void {
+  agentTeamsTabCard = { data, owner }
+}
+
+export function takeAgentTeamsTabCard(): { data: AgentTeamsCardData; owner: string } | undefined {
+  const card = agentTeamsTabCard
+  agentTeamsTabCard = undefined
+  return card
+}
+
 /** Props supplied by the better-sidebar tab renderer (structural subset). */
 export interface AgentTeamsTabProps {
   ctx: unknown
@@ -39,13 +59,11 @@ export interface AgentTeamsTabProps {
 }
 
 export function AgentTeamsTab(props: AgentTeamsTabProps) {
-  const { ctx, visible } = props
+  const { ctx, scope, visible } = props
   const runtime = ctx as ClientContext
   const [teams, setTeams] = useState<readonly ActivityTeam[]>([])
   const [archivedTeams, setArchivedTeams] = useState<readonly ActivityTeam[]>([])
-  // 历史卡片旧数据不再通过窗口事件注入；归档团队由 archivedTeams 快照覆盖。
-  // visibleHistoric 保留原 ActivityView 的能力，但实际值为空 map。
-  const [historic] = useState<ReadonlyMap<string, { data: AgentTeamsCardData; owner: string }>>(new Map())
+  const [historic, setHistoric] = useState<ReadonlyMap<string, { data: AgentTeamsCardData; owner: string }>>(new Map())
 
   // Latest snapshot state mirrored into refs so the poll interval closure
   // never reads a stale render's state.
@@ -55,14 +73,40 @@ export function AgentTeamsTab(props: AgentTeamsTabProps) {
   archivedTeamsRef.current = archivedTeams
 
   const sessions = runtime.sessions
-  const current = useSyncExternalStore(
+  const globalCurrent = useSyncExternalStore(
     useMemo(() => (callback: () => void) => sessions.list.subscribe(callback), [sessions]),
     useCallback(() => sessions.list.getSnapshot().current, [sessions]),
   )
+  // The sidebar's per-tab scope is the authoritative active session whenever
+  // it supplies one; fall back to the shell's global current session.
+  const activeSession: SessionId | undefined = scope?.sessionId === undefined
+    ? globalCurrent
+    : scope.sessionId as SessionId
 
-  // Poll only while this tab is actually visible (active + panel open).
+  // A card opened via the "AgentTeams" button should be visible in the tab
+  // even if its archive snapshot is not yet present. Seed historic once when
+  // the card arrives.
   useEffect(() => {
-    if (!visible || current === undefined) return
+    const card = takeAgentTeamsTabCard()
+    if (card === undefined) return
+    setHistoric((previous) => {
+      const key = `${card.owner}:${card.data.teamId}`
+      const next = new Map(previous)
+      next.set(key, card)
+      return next
+    })
+  }, [])
+
+  // Reset the badge whenever the tab is hidden, no session is active, or the
+  // active session changes. A stale earlier count must never survive these
+  // transitions.
+  useEffect(() => {
+    setAgentTeamsTabCount(0)
+  }, [activeSession, visible])
+
+  // Poll only while this tab is actually visible (active tab + open panel).
+  useEffect(() => {
+    if (!visible || activeSession === undefined) return
     let cancelled = false
     let inFlight = false
     const tick = async (): Promise<void> => {
@@ -93,8 +137,8 @@ export function AgentTeamsTab(props: AgentTeamsTabProps) {
         }
         if (!cancelled) {
           const visibleCount =
-            nextTeams.filter((team) => team.captainSessionId === current).length
-            + nextArchived.filter((team) => team.captainSessionId === current).length
+            nextTeams.filter((team) => team.captainSessionId === activeSession).length
+            + nextArchived.filter((team) => team.captainSessionId === activeSession).length
           setAgentTeamsTabCount(visibleCount)
         }
       } catch {
@@ -109,7 +153,7 @@ export function AgentTeamsTab(props: AgentTeamsTabProps) {
       cancelled = true
       clearInterval(timer)
     }
-  }, [visible, current])
+  }, [visible, activeSession])
 
   const onNavigate = (id: SessionId): void => {
     sessions.open?.(id)
@@ -120,7 +164,7 @@ export function AgentTeamsTab(props: AgentTeamsTabProps) {
       teams={teams}
       archivedTeams={archivedTeams}
       historic={historic}
-      currentSessionId={current}
+      currentSessionId={activeSession}
       onNavigate={onNavigate}
     />
   )

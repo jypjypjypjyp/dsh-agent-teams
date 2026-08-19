@@ -49,22 +49,6 @@ export function usesParallelTaskGrid<T extends RelationshipTask>(tasks: readonly
 }
 
 /**
- * Whether an expanded activity panel still belongs to the current session.
- *
- * The panel is mounted through a body portal, so React does not remount it
- * when the conversation route changes. Ownership keeps an expanded panel
- * from leaking onto the new-session screen (or another conversation) while
- * its local open state is being reset.
- */
-export function activityPanelExpandedForSession(
-  open: boolean,
-  owner: string | undefined,
-  current: string | undefined,
-): boolean {
-  return open && owner !== undefined && owner === current
-}
-
-/**
  * Resolve the task whose dependency chain should be highlighted.
  *
  * A pinned task is an explicit user choice. Keyboard focus takes precedence

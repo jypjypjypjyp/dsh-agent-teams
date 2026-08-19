@@ -29,7 +29,6 @@ import {
   withTeamLock,
 } from '../lib/state.js'
 import {
-  activityPanelExpandedForSession,
   compactDagLayout,
   COMPACT_DAG_NODE_HEIGHT,
   COMPACT_DAG_NODE_WIDTH,
@@ -362,12 +361,6 @@ check('compact DAG keeps stable rows and reference node geometry',
 check('compact DAG emits one curved SVG edge per valid dependency',
   dag.edges.length === 3
     && dag.edges.some(edge => edge.from === 't1' && edge.to === 't2' && edge.path.startsWith('M92 15C')))
-check(
-  'expanded activity panel belongs only to its current session',
-  activityPanelExpandedForSession(true, 'session-a', 'session-a')
-    && !activityPanelExpandedForSession(true, 'session-a', 'session-b')
-    && !activityPanelExpandedForSession(true, 'session-a', undefined),
-)
 check(
   'agent team cards derive a stable id from the standard create tool call',
   JSON.stringify(parseAgentTeamsCreateArgs('{"name":" Repo Review 2W! "}'))

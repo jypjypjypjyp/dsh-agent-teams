@@ -25,6 +25,9 @@ export const OPEN_PANEL_EVENT = 'agent-teams:open-panel'
 export interface AgentTeamsCardInjected {
   readonly openSession: (id: SessionId) => void
   readonly currentSessionId: () => SessionId | undefined
+  /** Present only when dsh-better-sidebar is loaded; wires the card button
+   *  to open the AgentTeams tab. */
+  readonly openAgentTeamsTab?: () => void
 }
 
 /** Complete keyed Chat renderer props. */

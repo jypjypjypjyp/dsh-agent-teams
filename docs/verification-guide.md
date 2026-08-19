@@ -207,7 +207,6 @@ const probe = await js(String.raw`(() => {
     focusedTasks: [...panel.querySelectorAll('[data-task-id][data-focused="true"]')].map(n => n.getAttribute('data-task-id')),
     pinnedTasks: [...panel.querySelectorAll('[data-task-id][aria-pressed="true"]')].map(n => n.getAttribute('data-task-id')),
     artLoaded: [...panel.querySelectorAll('img')].every(img => img.complete && img.naturalWidth > 0),
-    mainShift: getComputedStyle(document.querySelector('[data-phase="active"]')).paddingRight,
   }
 })()`)
 cliLog(JSON.stringify(probe, null, 1))
@@ -218,13 +217,13 @@ cliLog(JSON.stringify(probe, null, 1))
 - **composer 选择器会变**：placeholder 可能从"描述你想要构建的内容"变成"给智能体发消息"——先列出所有 textbox 再精确定位
 - CSS module 子串选择器容易过宽；探针优先使用稳定 `data-*`、role 和 aria 属性。
 - 验证 hover preview、click pin、第二次 click/`Escape` unpin；`aria-pressed` 只落在 pin 源任务，focused chain 排除 sibling。
-- 宽屏断言 main padding 非 0 且 panel/composer overlap 为 0；≤960px padding 回 0、无 body 横向溢出；关闭时采样中间帧确认不是瞬移。
-- 卡片激活事件可用 CustomEvent 模拟，但至少保留一次真实按钮路径。轮询状态用 browser wait/re-probe，不用 shell sleep 忙等。
+- 面板位于 better-sidebar 的 AgentTeams tab 内：打开 tab 后内容可探针；tab 未激活时不轮询（可在网络面板确认无 1s 请求）。
+- 卡片按钮只在安装 better-sidebar 时显示；用真实按钮路径打开 tab，至少保留一次真实交互。轮询状态用 browser wait/re-probe，不用 shell sleep 忙等。
 
 #### 3.4 截图存档
 
 ```js
-await captureScreenshot('/tmp/agent-teams-panel.png')   // 返回文件路径
+await captureScreenshot('/tmp/agent-teams-tab.png')   // 返回文件路径
 ```
 
 每轮关键状态各存一张（运行中 / 终态 / 归档复盘），供人类核对视觉；DOM 探针的文本证据与截图互补（探针是断言，截图是人工目检）。

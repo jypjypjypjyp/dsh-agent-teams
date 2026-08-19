@@ -478,7 +478,7 @@ export function ActivityView({ teams, archivedTeams, historic, currentSessionId,
     return <span className={css.emptyHint}>暂无团队活动</span>
   }
   return (
-    <div className={css.root}>
+    <div className={css.root} data-agent-teams-activity>
       {count === 0
         ? <span className={css.emptyHint}>暂无团队活动</span>
         : (

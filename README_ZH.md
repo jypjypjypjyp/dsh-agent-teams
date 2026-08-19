@@ -38,10 +38,14 @@
 > [!NOTE]
 > 使用前请确保已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。
 
+> [!NOTE]
+> 实时活动面板托管在 [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) 的 AgentTeams tab 中。安装 `dsh-better-sidebar`（v0.13+）后才会显示该 tab 与卡片内按钮；未安装时协作工具、对话卡片与持久化状态仍可用，只是不显示侧栏面板与按钮。
+
 ### npm
 
 ```sh
 dsh plugin --profile web add @nanmicoder/dsh-agent-teams
+dsh plugin --profile web add dsh-better-sidebar
 ```
 
 ### 从源码构建
@@ -76,7 +80,7 @@ dsh web
 5. 成员携带当前 `attempt_id` 更新任务；转派或队长接管会先撤销旧 attempt、等待原成员安静，再启动新 attempt。
 6. 队长汇总结果，随后归档完整团队记录。
 
-团队状态保存在 `<workspace>/.agent-teams/`；Web 面板读取这份磁盘真相，并与实时子 Agent 活动合并展示。
+团队状态保存在 `<workspace>/.agent-teams/`；AgentTeams tab 读取这份磁盘真相，并与实时子 Agent 活动合并展示。
 
 成员创建默认零交互：成员沿用队长当前 LLM 路由时会快照该 provider、model 与思考强度；用户要求改用其他路由时，则快照目标模型的默认强度，成员后续续跑仍使用最终解析出的快照。只有当用户明确提出异构分工（例如“后端用 provider A/model X，前端用 provider B/model Y”）时，队长才会把对应的 `provider` + `model` 传给该成员；不会逐个弹出模型或思考强度选择。
 

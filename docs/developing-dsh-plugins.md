@@ -348,10 +348,13 @@ export default {
 先读当前 `packages/client/ui-*/src/client/contract/slots.ts`。当前已有
 `conversation.session.header.actions`、`conversation.input.dock`、`conversation.composer.dock`、
 `conversation.input.left/right`、`conversation.chat.node` 等稳定接缝。能落入语义正确 slot 就优先注册；
+也可以复用第三方宿主插件提供的服务（例如 dsh-agent-teams 将活动面板注册为
+`dsh-better-sidebar` 的 tab，而不是自己挂 body portal）。
 只有跨会话、固定在 shell 角落且没有对应 seat 的全局面板，才使用 body portal + fixed 定位：
 
 ```tsx
-// src/client/index.tsx
+// src/client/index.tsx（示例仅用于说明 body portal 模式；AgentTeams 已迁移到
+// better-sidebar tab，不再使用这个挂载方式）
 import { createRoot } from 'react-dom/client'
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 

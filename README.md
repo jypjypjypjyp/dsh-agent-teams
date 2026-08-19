@@ -38,10 +38,14 @@ Ask in natural language. The plugin provides the team protocol, ten coordination
 > [!NOTE]
 > Requires an existing [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) installation.
 
+> [!NOTE]
+> The live activity panel is hosted inside the [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) tab. Install `dsh-better-sidebar` (v0.13+) to see the AgentTeams tab and the in-card button. Without it the coordination tools, conversation card, and durable state still work — only the visual tab and its button are hidden.
+
 ### npm
 
 ```sh
 dsh plugin --profile web add @nanmicoder/dsh-agent-teams
+dsh plugin --profile web add dsh-better-sidebar
 ```
 
 ### Build from source
@@ -76,7 +80,7 @@ Then ask for a team directly:
 5. Members update with the current `attempt_id`; reassignment or captain takeover revokes the old attempt and waits for the old worker to quiesce before a new attempt starts.
 6. The captain presents the combined result, then archives the complete team record.
 
-Team state is stored under `<workspace>/.agent-teams/`; the Web panel reads that disk truth and combines it with live sub-agent activity.
+Team state is stored under `<workspace>/.agent-teams/`; the AgentTeams tab reads that disk truth and combines it with live sub-agent activity.
 
 Member creation is zero-interaction by default: a member on the captain's current LLM route snapshots that provider, model, and reasoning effort, while a member on a requested alternative route snapshots the target model's default effort; later continuations restore the resolved snapshot. Only an explicit heterogeneous-team request (for example, “backend on provider A/model X, frontend on provider B/model Y”) supplies a member-specific `provider` + `model`; there is no per-member model or reasoning prompt.
 

@@ -132,7 +132,11 @@ function WorkGlyph({ active }: { readonly active: boolean }) {
 
 function memberStateLabel(member: ActivityMember, tasks: readonly ActivityTask[], historic: boolean): string {
   const owned = tasks.filter((task) => task.assignee === member.name)
-  if (member.activity === 'working' || member.status === 'working') return '工作中'
+  if (member.activity === 'working') return '工作中'
+  // Persistent status says work was claimed, but the live agent registry does
+  // not report an active session (process finished/died, or not yet picked up
+  // by the activity sampler). Distinguish "claimed" from actually running.
+  if (member.status === 'working') return '已认领'
   if (owned.some((task) => task.status === 'failed')) return '有失败'
   if (owned.some((task) => task.state === 'blocked')) return '等待'
   if (owned.length > 0 && owned.every((task) => task.status === 'completed')) return '已交付'
@@ -145,9 +149,9 @@ function memberStatusText(member: ActivityMember, tasks: readonly ActivityTask[]
   const owned = tasks.filter((task) => task.assignee === member.name)
   const current = owned.find((task) => task.id === member.currentTask)
   const blocked = owned.find((task) => task.state === 'blocked')
-  const working = member.activity === 'working' || member.status === 'working'
-  if (working && current !== undefined) return `正在执行 ${current.id}`
-  if (working) return '正在处理已派任务'
+  if (member.activity === 'working' && current !== undefined) return `正在执行 ${current.id}`
+  if (member.activity === 'working') return '正在处理已派任务'
+  if (member.status === 'working') return current !== undefined ? `已认领 ${current.id}` : '任务已认领，等待执行'
   if (blocked !== undefined) {
     const dependency = tasks.find((task) => blocked.dependencies.includes(task.id) && task.state !== 'completed')
     if (dependency !== undefined) return `等待 ${dependency.id} · ${dependency.assignee || '待认领'}`

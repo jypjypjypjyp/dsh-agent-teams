@@ -4,6 +4,7 @@ import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/c
 // Module-loading import: the card registers into the conversation chat-node
 // slot, whose keyed renderer map lives in the ui-conversation contract.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { IconAgentPresetOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AgentTeamsCard, type AgentTeamsCardInjected } from './AgentTeamsCard.tsx'
 import { agentTeamsCardDefinition } from './agent-teams-card-definition.ts'
 import { AgentTeamsTab, agentTeamsTabBadge } from './AgentTeamsTab.tsx'
@@ -30,6 +31,7 @@ export function apply(ctx: ClientContext): void {
     const disposer = betterSidebar!.registerTab({
       id: AGENT_TEAMS_TAB_ID,
       title: 'AgentTeams',
+      icon: (size: number) => <IconAgentPresetOutline16 size={size} />,
       order: 35,
       single: true,
       badge: () => agentTeamsTabBadge(),

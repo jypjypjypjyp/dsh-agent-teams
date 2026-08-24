@@ -38,7 +38,35 @@ import {
   taskStages,
   usesParallelTaskGrid,
 } from '../lib/client/activity-model.js'
+import {
+  ACTIVITY_POLL_MS,
+  ACTIVITY_PROBE_MS,
+  getActivityMonitorTargetsSnapshot,
+  monitorAgentTeam,
+  settleActivityMonitorTargets,
+  startActivityPolling,
+  subscribeActivityMonitorTargets,
+} from '../lib/client/activity-monitor.js'
+import {
+  DEFAULT_PANEL_LAYOUT,
+  compactPanelForBounds,
+  dockPanelLayout,
+  floatPanelLayout,
+  movePanelLayout,
+  panelMaximumHeight,
+  panelUsesAutoHeight,
+  parsePanelLayout,
+  resizePanelLayout,
+  resolvePanelGeometry,
+} from '../lib/client/panel-geometry.js'
+import { memberArtUrl } from '../lib/client/artwork.js'
 import { parseAgentTeamsCreateArgs } from '../lib/client/agent-teams-card-definition.js'
+import {
+  AGENT_TEAMS_LOCALE_NAMESPACE,
+  en as agentTeamsEn,
+  zh as agentTeamsZh,
+} from '../lib/client/locales.js'
+import { openAgentTeamMember } from '../lib/client/session-navigation.js'
 import { steerCaptainReport } from '../lib/tools.js'
 import {
   installMemberSelectionRuntime,
@@ -105,6 +133,104 @@ check(
 )
 const activityPanelCss = await readFile(new URL('../src/client/ActivityPanel.module.css', import.meta.url), 'utf8')
 const activityPanelSource = await readFile(new URL('../src/client/ActivityPanel.tsx', import.meta.url), 'utf8')
+const clientIndexSource = await readFile(new URL('../src/client/index.tsx', import.meta.url), 'utf8')
+const agentTeamsCardCss = await readFile(new URL('../src/client/AgentTeamsCard.module.css', import.meta.url), 'utf8')
+const agentTeamsCardSource = await readFile(new URL('../src/client/AgentTeamsCard.tsx', import.meta.url), 'utf8')
+const artworkSource = await readFile(new URL('../src/client/artwork.ts', import.meta.url), 'utf8')
+const hostSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8')
+const localeKeys = Object.keys(agentTeamsZh).sort()
+const englishLocaleKeys = Object.keys(agentTeamsEn).sort()
+const placeholders = value => [...value.matchAll(/\{(\w+)\}/gu)].map(match => match[1]).sort()
+check(
+  'AgentTeams locale dictionaries have identical keys and template placeholders',
+  localeKeys.length > 0
+    && JSON.stringify(localeKeys) === JSON.stringify(englishLocaleKeys)
+    && localeKeys.every(key => JSON.stringify(placeholders(agentTeamsZh[key]))
+      === JSON.stringify(placeholders(agentTeamsEn[key]))),
+)
+check(
+  'client registers the official locale namespace on both visible slots',
+  AGENT_TEAMS_LOCALE_NAMESPACE === 'agentTeams'
+    && clientIndexSource.includes("'conversationEvents', 'slots', 'sessions', 'locale'")
+    && clientIndexSource.includes('ctx.locale.register(AGENT_TEAMS_LOCALE_NAMESPACE, { zh, en })')
+    && clientIndexSource.match(/locale:\s*AGENT_TEAMS_LOCALE_NAMESPACE/gu)?.length === 2,
+)
+check(
+  'slash command transcript hides the duplicate pre-message result row',
+  clientIndexSource.includes('HiddenAgentTeamsCommand')
+    && /name:\s*'conversation\.chat\.commandview',\s*key:\s*'agent-teams'/u.test(clientIndexSource),
+)
+const expectedArtwork = [
+  'team-lead-v2.png',
+  'member-researcher-v2.png', 'member-engineer-v2.png',
+  'member-qa-v2.png', 'member-designer-v2.png',
+  'member-security-v2.png', 'member-docs-v2.png',
+  'member-data-v2.png', 'member-operator-v2.png',
+  'action-working-v2.png', 'action-thinking-v2.png',
+  'action-reporting-v2.png', 'action-celebrating-v2.png',
+  'action-sleeping-v2.png', 'action-sending-v2.png',
+].sort()
+const artworkDir = new URL('../assets/agent-teams/', import.meta.url)
+const packagedArtwork = (await readdir(artworkDir)).sort()
+check(
+  'artwork directory contains exactly the V2 captain, eight members, and six actions',
+  JSON.stringify(packagedArtwork) === JSON.stringify(expectedArtwork),
+  `artwork = ${JSON.stringify(packagedArtwork)}`,
+)
+const artworkHeaders = await Promise.all(expectedArtwork.map(async (name) => {
+  const data = await readFile(new URL(name, artworkDir))
+  return {
+    name,
+    png: data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+    width: data.readUInt32BE(16),
+    height: data.readUInt32BE(20),
+    bitDepth: data[24],
+    colorType: data[25],
+  }
+}))
+check(
+  'all V2 artwork is 256x256 8-bit RGBA PNG',
+  artworkHeaders.every(image => image.png
+    && image.width === 256
+    && image.height === 256
+    && image.bitDepth === 8
+    && image.colorType === 6),
+  `invalid headers = ${JSON.stringify(artworkHeaders.filter(image => !image.png
+    || image.width !== 256
+    || image.height !== 256
+    || image.bitDepth !== 8
+    || image.colorType !== 6))}`,
+)
+check(
+  'client mapping and host allowlist reference every V2 artwork asset',
+  expectedArtwork.every(name => artworkSource.includes(name) || hostSource.includes(name))
+    && artworkSource.includes('member-data-v2.png')
+    && artworkSource.includes('member-operator-v2.png'),
+  'a packaged image is unreachable or one of the eighth-member mappings is missing',
+)
+const eightRoleArtwork = [
+  ['Researcher', 'Researcher'],
+  ['Engineer', 'Backend Engineer'],
+  ['QA', 'QA Engineer'],
+  ['Designer', 'UI UX Designer'],
+  ['Security', 'Security Reviewer'],
+  ['Docs', 'Docs Writer'],
+  ['Data', 'Data Analyst'],
+  ['Operator', 'Release Operator'],
+].map(([name, role]) => memberArtUrl(name, role))
+check(
+  'canonical eight-member roster resolves to eight distinct role images',
+  eightRoleArtwork.every(Boolean) && new Set(eightRoleArtwork).size === 8,
+  `resolved artwork = ${JSON.stringify(eightRoleArtwork)}`,
+)
+check(
+  'whale portraits use transparent cutouts instead of dark circular plates',
+  !/#0b1d33/iu.test(`${activityPanelCss}\n${agentTeamsCardCss}`)
+    && activityPanelCss.includes('object-fit: contain')
+    && activityPanelCss.includes('agentTeamsUnreadPulse')
+    && agentTeamsCardCss.includes('object-fit: contain'),
+  'portrait CSS should preserve each transparent role silhouette and use a compact unread dot',
+)
 const requiredHarnessTokenBridges = [
   '--dsw-alias-line-normal: var(--dsw-static-neutral-bluish-150',
   '--dsw-alias-bg-module: var(--dsw-alias-bg-layer-1',
@@ -117,16 +243,28 @@ check(
   requiredHarnessTokenBridges.every(token => activityPanelCss.includes(token)),
   'missing token bridges make panel fills and DAG borders transparent',
 )
-const requiredPanelSizing = [
-  '--agent-teams-panel-min-height: 560px',
-  'min-height: min(',
-  'max-height: calc(100dvh - var(--agent-teams-panel-top) - var(--agent-teams-panel-bottom-gap))',
-]
 check(
-  'activity panel grows between a stable minimum and balanced viewport maximum',
-  requiredPanelSizing.every(rule => activityPanelCss.includes(rule))
-    && !activityPanelCss.includes('height: min(560px'),
-  'a fixed panel height leaves excessive space below tall viewports',
+  'activity panel uses the shell overlay instead of a page-breaking body portal',
+  clientIndexSource.includes("ctx.slots.inject('shell.overlay'")
+    && !clientIndexSource.includes('createRoot')
+    && activityPanelCss.includes('position: absolute')
+    && !activityPanelCss.includes('2147483000')
+    && !activityPanelCss.includes('position: fixed'),
+  'a body portal or unbounded z-index can cover host modal controls',
+)
+check(
+  'panel exposes drag, resize, dock, and fold interaction probes',
+  activityPanelSource.includes('data-drag-handle')
+    && activityPanelSource.includes('data-resize-edge="left"')
+    && activityPanelSource.includes('data-resize-edge="corner"')
+    && activityPanelSource.includes('data-control="dock"')
+    && activityPanelSource.includes('data-control="collapse"')
+    && activityPanelSource.includes('data-height-mode=')
+    && activityPanelSource.includes("height: autoHeight ? 'auto'")
+    && activityPanelCss.includes('.resizeHandle')
+    && activityPanelCss.includes('scrollbar-width: thin')
+    && !activityPanelCss.includes('scrollbar-width: none'),
+  'interactive panel controls must stay visible to browser verification',
 )
 check(
   'running DAG tasks reuse the animated work glyph without losing focus context',
@@ -136,6 +274,15 @@ check(
     && activityPanelCss.includes(".dagNode[data-state='running'][data-dimmed='true']")
     && activityPanelCss.includes('.dagRunningState {'),
   'running work should stay visible in both normal and dependency-focus states',
+)
+check(
+  'activity polling combines card demand with current-session cold discovery',
+  activityPanelSource.includes('if (current === undefined) return')
+    && activityPanelSource.includes('startActivityPolling(currentTargets, { discoverySessionId: current })')
+    && agentTeamsCardSource.includes('monitorAgentTeam(owner, data.teamId)')
+    && !agentTeamsCardSource.includes('setInterval(')
+    && !agentTeamsCardSource.includes('fetch('),
+  'the global panel must recover cardless sessions without duplicate card pollers',
 )
 
 console.log('2/8 pure rules')
@@ -363,11 +510,298 @@ check('compact DAG keeps stable rows and reference node geometry',
 check('compact DAG emits one curved SVG edge per valid dependency',
   dag.edges.length === 3
     && dag.edges.some(edge => edge.from === 't1' && edge.to === 't2' && edge.path.startsWith('M92 15C')))
+const panelBounds = { width: 1440, height: 900, anchorRight: 1440 }
+const dockedPanel = resolvePanelGeometry(DEFAULT_PANEL_LAYOUT, panelBounds)
+check('docked panel follows the shell anchor and retains an available-height ceiling',
+  dockedPanel.mode === 'docked'
+    && dockedPanel.x === 1034
+    && dockedPanel.y === 64
+    && dockedPanel.width === 388
+    && dockedPanel.height === 788
+    && dockedPanel.heightMode === 'auto'
+    && panelUsesAutoHeight(dockedPanel, panelBounds)
+    && panelMaximumHeight(dockedPanel, panelBounds) === 788)
+const floatingPanel = floatPanelLayout(dockedPanel, panelBounds)
+const movedPanel = movePanelLayout(floatingPanel, 999, 999, panelBounds)
+check('floating panel movement clamps every edge inside the shell',
+  movedPanel.mode === 'floating' && movedPanel.x === 1040 && movedPanel.y === 100)
+const widerDockedPanel = resizePanelLayout(dockedPanel, 'left', -120, 0, panelBounds)
+check('docked left-edge resize preserves the right anchor',
+  widerDockedPanel.width === 508 && widerDockedPanel.x === 914)
+const narrowerFloatingPanel = resizePanelLayout(floatingPanel, 'left', 200, 0, panelBounds)
+check('floating left-edge resize preserves the opposite edge at minimum width',
+  narrowerFloatingPanel.width === 320 && narrowerFloatingPanel.x === 1102)
+const cornerPanel = resizePanelLayout({ ...floatingPanel, x: 400, y: 200, width: 388, height: 500 }, 'corner', 1200, 1200, panelBounds)
+check('floating corner resize preserves its top-left anchor at shell limits',
+  cornerPanel.x === 400 && cornerPanel.y === 200
+    && cornerPanel.width === 640 && cornerPanel.height === 688
+    && cornerPanel.heightMode === 'manual'
+    && !panelUsesAutoHeight(cornerPanel, panelBounds))
+const bottomPanel = resizePanelLayout({ ...floatingPanel, x: 400, y: 200, width: 388, height: 500 }, 'bottom', 0, 1200, panelBounds)
+check('floating bottom resize preserves its top edge at the shell limit',
+  bottomPanel.y === 200 && bottomPanel.height === 688
+    && bottomPanel.heightMode === 'manual')
+const redockedPanel = dockPanelLayout({ ...floatingPanel, width: 472, x: 120, y: 100, heightMode: 'manual' }, panelBounds)
+check('dock toggle preserves width while restoring shell alignment and content-fit height',
+  redockedPanel.x === 950 && redockedPanel.width === 472 && redockedPanel.heightMode === 'auto')
+const compactBounds = { width: 900, height: 700, anchorRight: 900 }
+const compactPanel = resolvePanelGeometry(floatingPanel, compactBounds)
+check('compact shell disables free geometry and uses a balanced inset',
+  compactPanelForBounds(compactBounds)
+    && compactPanel.x === 12 && compactPanel.y === 12
+    && compactPanel.width === 876 && compactPanel.height === 676
+    && panelUsesAutoHeight({ ...compactPanel, heightMode: 'manual' }, compactBounds)
+    && panelMaximumHeight(compactPanel, compactBounds) === 676)
+check('persisted panel state rejects corrupt or partial values',
+  parsePanelLayout('{"mode":"floating","x":1}').mode === 'docked'
+    && parsePanelLayout('not-json').mode === 'docked')
+const migratedPanel = parsePanelLayout('{"mode":"floating","x":120,"y":80,"width":420,"height":600}')
+const manualPanel = parsePanelLayout('{"mode":"floating","x":120,"y":80,"width":420,"height":600,"heightMode":"manual"}')
+const legacyDockedManualPanel = parsePanelLayout('{"mode":"docked","x":120,"y":80,"width":420,"height":600,"heightMode":"manual"}')
+check('persisted panel height migrates to auto but preserves explicit manual sizing',
+  migratedPanel.heightMode === 'auto'
+    && panelUsesAutoHeight(migratedPanel, panelBounds)
+    && manualPanel.heightMode === 'manual'
+    && !panelUsesAutoHeight(manualPanel, panelBounds)
+    && legacyDockedManualPanel.heightMode === 'auto')
 check(
   'expanded activity panel belongs only to its current session',
   activityPanelExpandedForSession(true, 'session-a', 'session-a')
     && !activityPanelExpandedForSession(true, 'session-a', 'session-b')
     && !activityPanelExpandedForSession(true, 'session-a', undefined),
+)
+let monitorNotifications = 0
+const unsubscribeMonitor = subscribeActivityMonitorTargets(() => { monitorNotifications += 1 })
+const releaseMonitorOne = monitorAgentTeam('verify-session', 'verify-team')
+const releaseMonitorTwo = monitorAgentTeam('verify-session', 'verify-team')
+const registeredMonitor = getActivityMonitorTargetsSnapshot()[0]
+check(
+  'activity monitor coalesces duplicate cards into one shared target',
+  getActivityMonitorTargetsSnapshot().length === 1
+    && registeredMonitor?.sessionId === 'verify-session'
+    && registeredMonitor.teamId === 'verify-team',
+)
+releaseMonitorOne()
+check('one card cleanup keeps another card monitoring', getActivityMonitorTargetsSnapshot().length === 1)
+if (registeredMonitor !== undefined) settleActivityMonitorTargets(new Set([registeredMonitor.key]))
+check('archived targets retire from polling', getActivityMonitorTargetsSnapshot().length === 0)
+releaseMonitorTwo()
+unsubscribeMonitor()
+check('activity monitor publishes lifecycle changes without duplicate-card churn', monitorNotifications === 2)
+
+let dormantFetches = 0
+let dormantSchedules = 0
+const dormantPoller = startActivityPolling([], {
+  fetchState: async () => {
+    dormantFetches += 1
+    return { ok: true, json: async () => ({ teams: [] }) }
+  },
+  schedule: () => {
+    dormantSchedules += 1
+    return 0
+  },
+})
+await dormantPoller.firstTick
+dormantPoller.stop()
+check(
+  'no monitor targets create no request and no timer',
+  dormantFetches === 0 && dormantSchedules === 0,
+)
+
+const discoveryUrls = []
+const discoveryIntervals = []
+let scheduledDiscoveryTick
+const discoveryPoller = startActivityPolling([], {
+  discoverySessionId: 'cold-captain',
+  fetchState: async (url) => {
+    discoveryUrls.push(url)
+    return { ok: true, json: async () => ({ teams: [] }) }
+  },
+  schedule: (callback, intervalMs) => {
+    scheduledDiscoveryTick = callback
+    discoveryIntervals.push(intervalMs)
+    return 'discovery-timer'
+  },
+  cancel: () => {},
+  publishSnapshots: () => {},
+})
+await discoveryPoller.firstTick
+scheduledDiscoveryTick?.()
+await new Promise((resolve) => setImmediate(resolve))
+discoveryPoller.stop()
+check(
+  'a cardless cold session restores live and archive once, then probes at the discovery cadence',
+  discoveryUrls.length === 3
+    && discoveryUrls[0] === '/plugins/dsh-agent-teams/state'
+    && discoveryUrls[1]?.endsWith('?archived=1')
+    && discoveryUrls[2] === '/plugins/dsh-agent-teams/state'
+    && discoveryIntervals.length === 1
+    && discoveryIntervals[0] === ACTIVITY_PROBE_MS,
+)
+
+// Regression (GitHub #57): a team created AFTER the cold-start discovery pass
+// (e.g. a run_code-wrapped agent_teams_create) must be discovered without a
+// manual reload. The controller keeps probing while its discovery session owns
+// no team yet, so a later team is published — and once found, the probe
+// upgrades to the live cadence so the panel stays fresh.
+const latePublished = []
+const lateUrls = []
+const lateIntervals = []
+let lateLiveTeams = []
+let lateTick = () => {}
+const latePoller = startActivityPolling([], {
+  discoverySessionId: 'cold-captain',
+  fetchState: async (url) => {
+    lateUrls.push(url)
+    if (url === '/plugins/dsh-agent-teams/state') {
+      return { ok: true, json: async () => ({ teams: lateLiveTeams }) }
+    }
+    return { ok: true, json: async () => ({ teams: [] }) }
+  },
+  schedule: (callback, intervalMs) => {
+    lateTick = callback
+    lateIntervals.push(intervalMs)
+    return 'late-timer'
+  },
+  cancel: () => {},
+  publishSnapshots: (update) => { latePublished.push(update) },
+})
+await latePoller.firstTick
+lateTick()
+await new Promise((resolve) => setImmediate(resolve))
+check(
+  'a cardless session keeps probing at the discovery cadence after an empty first pass',
+  lateUrls.length === 3
+    && lateIntervals.length === 1
+    && lateIntervals[0] === ACTIVITY_PROBE_MS,
+)
+lateLiveTeams = [{
+  workspace: '',
+  teamId: 'post-discovery-team',
+  name: 'Post Discovery Team',
+  captainSessionId: 'cold-captain',
+  members: [],
+  tasks: [],
+  messageCount: 0,
+  captainInbox: [],
+}]
+lateTick()
+await new Promise((resolve) => setImmediate(resolve))
+latePoller.stop()
+check(
+  'a team created after the discovery pass is picked up without a reload and upgrades to the live cadence',
+  lateUrls.length === 4
+    && latePublished.some((update) => update.teams?.some((team) => team.teamId === 'post-discovery-team'))
+    && lateIntervals.length === 2
+    && lateIntervals[1] === ACTIVITY_POLL_MS,
+)
+
+// Explicit card targets are demanded work: they start at the live cadence and
+// are never downgraded to the low-frequency probe.
+const cardIntervals = []
+const cardPoller = startActivityPolling([{
+  key: 'card-target',
+  sessionId: 'card-session',
+  teamId: 'card-team',
+}], {
+  fetchState: async () => ({ ok: true, json: async () => ({ teams: [] }) }),
+  schedule: (_callback, intervalMs) => {
+    cardIntervals.push(intervalMs)
+    return 'card-timer'
+  },
+  cancel: () => {},
+  publishSnapshots: () => {},
+})
+await cardPoller.firstTick
+cardPoller.stop()
+check(
+  'explicit card targets poll at the live cadence from the start',
+  cardIntervals.length === 1 && cardIntervals[0] === ACTIVITY_POLL_MS,
+)
+
+const pollTarget = { key: 'poll-target', sessionId: 'poll-session', teamId: 'poll-team' }
+let resolveSlowLive
+const slowLive = new Promise((resolve) => { resolveSlowLive = resolve })
+const slowFetchSignals = []
+let slowFetchCount = 0
+let scheduledTick
+let cancelledTimer = false
+let latePublications = 0
+const slowPoller = startActivityPolling([pollTarget], {
+  fetchState: async (_url, init) => {
+    slowFetchCount += 1
+    slowFetchSignals.push(init.signal)
+    return slowLive
+  },
+  schedule: (callback) => {
+    scheduledTick = callback
+    return 'slow-timer'
+  },
+  cancel: (timer) => { cancelledTimer = timer === 'slow-timer' },
+  publishSnapshots: () => { latePublications += 1 },
+})
+scheduledTick?.()
+scheduledTick?.()
+await Promise.resolve()
+check('a slow state request never overlaps the next interval', slowFetchCount === 1)
+slowPoller.stop()
+check(
+  'stopping activity polling clears its timer and aborts the in-flight request',
+  cancelledTimer && slowFetchSignals[0]?.aborted === true,
+)
+resolveSlowLive?.({ ok: true, json: async () => ({ teams: [] }) })
+await slowPoller.firstTick
+check('a late response after stop cannot publish snapshots', latePublications === 0)
+
+const fallbackUrls = []
+const settledFallbackKeys = []
+let fallbackResponseIndex = 0
+const fallbackResponses = [
+  { ok: true, json: async () => ({ teams: [] }) },
+  { ok: true, json: async () => ({ teams: [] }) },
+]
+const fallbackPoller = startActivityPolling([pollTarget], {
+  fetchState: async (url) => {
+    fallbackUrls.push(url)
+    return fallbackResponses[fallbackResponseIndex++]
+  },
+  schedule: () => 'fallback-timer',
+  cancel: () => {},
+  publishSnapshots: () => {},
+  settleTargets: (keys) => { settledFallbackKeys.push(...keys) },
+})
+await fallbackPoller.firstTick
+fallbackPoller.stop()
+check(
+  'a live miss checks archive once and retires even an orphaned legacy card',
+  fallbackUrls.length === 2
+    && fallbackUrls[1]?.endsWith('?archived=1')
+    && settledFallbackKeys.length === 1
+    && settledFallbackKeys[0] === pollTarget.key,
+)
+const navigationCalls = []
+const addressedNavigation = await openAgentTeamMember({
+  open: (id) => { navigationCalls.push(['open', id]) },
+  refreshSubagents: async (id) => { navigationCalls.push(['refresh', id]) },
+  subagentAddress: () => undefined,
+  openSubagent: (address) => { navigationCalls.push(['openSubagent', address]) },
+}, 'captain-session', 'member-session')
+check(
+  'rc.8 member navigation refreshes the parent catalog and opens an addressed continuable child',
+  addressedNavigation === 'subagent'
+    && navigationCalls[0]?.[0] === 'refresh'
+    && navigationCalls[1]?.[0] === 'openSubagent'
+    && navigationCalls[1]?.[1]?.parentSessionId === 'captain-session'
+    && navigationCalls[1]?.[1]?.childSessionId === 'member-session'
+    && navigationCalls[1]?.[1]?.mode === 'continuable',
+)
+const legacyNavigationCalls = []
+const legacyNavigation = await openAgentTeamMember({
+  open: (id) => { legacyNavigationCalls.push(id) },
+}, 'captain-session', 'member-session')
+check(
+  'pre-rc.8 member navigation keeps the ordinary session fallback',
+  legacyNavigation === 'session' && legacyNavigationCalls[0] === 'member-session',
 )
 check(
   'agent team cards derive a stable id from the standard create tool call',

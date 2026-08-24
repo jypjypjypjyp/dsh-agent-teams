@@ -26,6 +26,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { registerAgentTeamsTools, type ToolsConfig } from './tools.ts'
+import { installAgentTeamsGestureBoundary, registerAgentTeamsCommand } from './command.ts'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -71,6 +72,12 @@ export interface Config {
   maxMembers?: number
   /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
   promptSectionOrder?: number
+  /**
+   * Register the deterministic `/agent-teams` activation surfaces (the
+   * closed-namespace slash command and the plain-text gesture boundary).
+   * Disable to keep the natural-language trigger as the only entry point.
+   */
+  slashCommand?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -80,17 +87,18 @@ export const Config: z<Config> = z.object({
   memberMaxDepth: z.natural().default(1),
   maxMembers: z.natural().min(1).default(8),
   promptSectionOrder: z.natural().default(117),
+  slashCommand: z.boolean().default(true),
 })
 
 /** The model-facing usage policy: when and how to drive AgentTeams. */
 function usageSectionText(toolNames: string): string {
-  return `When the user asks to run something with AgentTeams (e.g. "use AgentTeams to do X"), you are the captain of a multi-agent team. Follow this protocol:
+  return `When the user asks to run something with AgentTeams (e.g. "use AgentTeams to do X"), or an activation message from the /agent-teams slash command arrives, you are the captain of a multi-agent team. Follow this protocol:
 1. Call agent_teams_create with a team name and the goal as description. You become the captain and may lead one team at a time.
 2. Call agent_teams_add_member once per role the goal needs (researcher, engineer, reviewer, ...). Members are durable subagents: they wait for your messages, then work a full turn. By default a member on your current provider/model snapshots your current reasoning effort; a member routed to a different provider or model automatically uses that target model's default effort. Never ask the user to choose these per member; only pass provider/model when the user explicitly requests a different route for that role, and reasoning_effort only when the user explicitly requests a particular effort ("default" explicitly selects the target model's default).
 3. Break the goal into tasks with agent_teams_create_task and wire dependencies. Assign role-specific work when useful; unassigned ready work belongs to the shared pool. The scheduler automatically claims one ready task for each truly idle member and wakes it, including across later rounds.
-4. Lead by delegation: monitor with agent_teams_status, send guidance with agent_teams_send_message, and let idle teammates execute ready work. Do not duplicate a teammate's work merely because its turn is slow.
-5. If work is blocked, stale, or needs takeover, always call agent_teams_reassign_task first. Reassign to another idle member, or use assignee=captain before doing it yourself. Reassignment revokes the old attempt and waits for that member to quiesce, preventing late results from overwriting the new attempt.
-6. Tasks carry attempt_id capabilities. Members must use the current attempt_id for updates; stale-attempt errors mean ownership changed. Poll status until every required task is terminal and every member is idle/ready.
+4. Lead by delegation: monitor with agent_teams_status, send guidance with agent_teams_send_message, and let idle teammates execute ready work. Do not duplicate a teammate's work merely because its turn is slow. If the user requires every member to contribute or report, create one task per required contribution (or message each member directly); never wait for an unassigned member to produce work it was never given.
+5. If the user explicitly asks to pause a running member, its open attempt remains parked after interruption; after answering the user, send that same member guidance with agent_teams_send_message so it continues the same attempt. Do not interrupt members for an ordinary user question that did not request a pause. If work must change owner, restart from scratch, or be taken over, call agent_teams_reassign_task first. Reassign to another idle member, retry with the same member, or use assignee=captain before doing it yourself. Reassignment revokes the old attempt and waits for that member to quiesce, preventing late results from overwriting the new attempt.
+6. Tasks carry attempt_id capabilities. Members must use the current attempt_id for updates; stale-attempt errors mean ownership changed. Check status after progress notifications until every required task is terminal and every member is idle/ready; do not busy-poll or require reports from members with no assigned work.
 7. Present the team's results to the user, then agent_teams_delete the team unless the user wants to keep working with it.
 
 Tools: ${toolNames}`
@@ -131,6 +139,23 @@ export function apply(ctx: Context, config: Config): void {
 
   registerAgentTeamsTools(ctx, resolved)
 
+  // Deterministic activation surfaces: the closed-namespace `/agent-teams`
+  // host command (surfaces in the Web GUI slash menu via the Harness
+  // ui-commands client) and the plain-text gesture boundary for surfaces
+  // without command adjudication (headless CLI). Both default on; a profile
+  // can disable them to keep the natural-language trigger exclusive.
+  //
+  // `commands` is registered lazily (not a required inject): it ships in the
+  // base bundle of every standard profile, but a minimal composition that
+  // omits the command registry keeps the plugin fully functional — the fiber
+  // never pends on it and simply never gains the slash command.
+  if (config.slashCommand ?? true) {
+    ctx.inject(['commands'], (commandCtx) => {
+      registerAgentTeamsCommand(commandCtx)
+    })
+    installAgentTeamsGestureBoundary(ctx)
+  }
+
   // The activity panel data/artwork routes need the Web server and the
   // workspace registry, which headless profiles do not mount; under
   // concurrent activation they may also bind after this plugin. Register the
@@ -169,16 +194,19 @@ export function apply(ctx: Context, config: Config): void {
     },
   }), 'agent-teams: activity route')
 
-  // Whale mascot artwork: serve the packaged role/action images to the
+  // Whale mascot artwork: serve the packaged V2 role/action images to the
   // activity panel. An explicit allowlist guards the route (no path
   // traversal); the images ship with the bundle (files: assets/).
   const artDir = fileURLToPath(new URL('../assets/agent-teams/', import.meta.url))
   const ART_ALLOWLIST = new Set([
-    'team-lead.png', 'researcher.png', 'engineer.png', 'designer.png',
-    'qa-engineer.png', 'security-reviewer.png', 'data-analyst.png',
-    'docs-coordinator.png', 'action-working.png', 'action-thinking.png',
-    'action-reporting.png', 'action-celebrating.png', 'action-sleeping.png',
-    'action-sending.png',
+    'team-lead-v2.png',
+    'member-researcher-v2.png', 'member-engineer-v2.png',
+    'member-qa-v2.png', 'member-designer-v2.png',
+    'member-security-v2.png', 'member-docs-v2.png',
+    'member-data-v2.png', 'member-operator-v2.png',
+    'action-working-v2.png', 'action-thinking-v2.png',
+    'action-reporting-v2.png', 'action-celebrating-v2.png',
+    'action-sleeping-v2.png', 'action-sending-v2.png',
   ])
     ctx.effect(() => webServer.register({
       kind: 'prefix',

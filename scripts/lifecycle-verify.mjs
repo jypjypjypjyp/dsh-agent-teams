@@ -12,6 +12,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { registerAgentTeamsTools } from '../lib/tools.js'
+import { buildActivationDirective, invokedAgentTeamsGoal, registerAgentTeamsCommand } from '../lib/command.js'
 import { readArchivedTeam, readTeam, readUnreadMailbox } from '../lib/state.js'
 import { collectArchivedTeamsActivity } from '../lib/snapshot.js'
 
@@ -49,6 +50,10 @@ function makeAgent(id, parentSession) {
     status: 'idle',
     options: { provider: 'fake', model: 'fake-model' },
     session: session(parentSession),
+    followups: [],
+    followup(message) {
+      this.followups.push(message)
+    },
     steer() {},
     cancel() {},
     whenIdle() {
@@ -164,6 +169,55 @@ const state = () => readTeam(stateRoot, teamId)
 const task = async id => (await state())?.tasks.find(candidate => candidate.id === id)
 
 console.log('dsh-agent-teams lifecycle verification')
+
+// ── /agent-teams slash command and gesture boundary ───────────────────
+const commandDefinitions = new Map()
+ctx.commands = {
+  register(definition) {
+    commandDefinitions.set(definition.name, definition)
+  },
+}
+registerAgentTeamsCommand(ctx)
+
+const command = commandDefinitions.get('agent-teams')
+check('slash command registers as /agent-teams',
+  command !== undefined && typeof command.description === 'string' && command.description.length > 0)
+check('slash command advertises an input hint for the menu placeholder',
+  typeof command?.input?.hint === 'string' && command.input.hint.length > 0)
+
+const bare = command.handler({
+  agent: captain, rawInput: '   ', signal: new AbortController().signal, commandId: 'cmd-bare',
+})
+check('bare /agent-teams reports usage instead of activating',
+  bare.kind === 'error' && bare.text.includes('Usage: /agent-teams')
+    && captain.followups.length === 0)
+
+const goal = 'ship a tiny CLI'
+const activated = command.handler({
+  agent: captain, rawInput: `  ${goal}  `, signal: new AbortController().signal, commandId: 'cmd-goal',
+})
+check('argued /agent-teams queues one visible user turn',
+  activated.kind === 'success' && captain.followups.length === 1)
+const submittedCommand = captain.followups[0]
+check('slash command preserves the exact submitted line as user-authored chat',
+  submittedCommand?.source?.kind === 'user'
+    && submittedCommand.content.some(block => block.type === 'text'
+      && block.text === `/agent-teams  ${goal}  `))
+check('preserved slash command still activates through the gesture boundary',
+  invokedAgentTeamsGoal([submittedCommand]) === goal)
+check('activation directive names the protocol', buildActivationDirective(goal).includes('AgentTeams protocol'))
+
+const userMessage = text => ({ id: 'm', role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } })
+check('gesture recognizes a leading /agent-teams token',
+  invokedAgentTeamsGoal([userMessage('/agent-teams ship a CLI')]) === 'ship a CLI')
+check('bare gesture yields an empty goal', invokedAgentTeamsGoal([userMessage('  /agent-teams')]) === '')
+check('mid-sentence mention stays ordinary prose',
+  invokedAgentTeamsGoal([userMessage('how do I use /agent-teams here?')]) === undefined)
+check('non-user sources cannot forge the gesture',
+  invokedAgentTeamsGoal([{ ...userMessage('/agent-teams x'), source: { kind: 'plugin', plugin: 'fake' } }]) === undefined)
+check('latest user gesture wins in a batch',
+  invokedAgentTeamsGoal([userMessage('/agent-teams first'), userMessage('/agent-teams second')]) === 'second')
+
 try {
   await call('agent_teams_create', { name: 'Lifecycle', description: 'adversarial DAG' })
   const addedAlpha = await call('agent_teams_add_member', { name: 'alpha', role: 'slow implementer' })
@@ -196,6 +250,44 @@ try {
     task_id: t2.task_id, status: 'in_progress', attempt_id: betaClaim.attempt_id,
   }, beta)
   check('dependency gate stays pending before both branches complete', (await task(t3.task_id))?.status === 'pending')
+
+  // A normal turn may end while its task is intentionally parked waiting for
+  // guidance, and a user can explicitly pause a running member. Neither case
+  // authorizes the scheduler to revoke the live attempt. Repeated status kicks
+  // must be idempotent until the captain performs an explicit reassignment.
+  publishStatus(alpha, 'idle')
+  await new Promise(resolve => setTimeout(resolve, 20))
+  // Normal continuable settlement disposes its live AgentHandle between
+  // turns. The process-local idle observation must still distinguish this
+  // parked attempt from a cold process restart.
+  liveAgents.delete(alpha.id)
+  const deliveriesBeforeParkedKicks = deliveries.length
+  await Promise.all([
+    call('agent_teams_status', {}),
+    call('agent_teams_status', {}),
+    call('agent_teams_status', {}),
+  ])
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const parkedAlpha = await task(t1.task_id)
+  check('resident idle owner keeps its open attempt across repeated scheduler kicks',
+    parkedAlpha?.status === 'in_progress'
+      && parkedAlpha.attempt === alphaClaim.attempt
+      && parkedAlpha.attemptId === alphaClaim.attempt_id
+      && deliveries.length === deliveriesBeforeParkedKicks)
+  liveAgents.set(alpha.id, alpha)
+
+  publishStatus(beta, 'idle')
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const deliveriesBeforeResume = deliveries.length
+  const resumedBeta = await call('agent_teams_send_message', {
+    to: 'beta', content: 'Continue the same parked task and keep its current attempt id.',
+  })
+  const resumedBetaTask = await task(t2.task_id)
+  check('captain message resumes a parked owner without rotating its attempt',
+    resumedBeta.delivered === 'wake'
+      && deliveries.length === deliveriesBeforeResume + 1
+      && resumedBetaTask?.attempt === betaClaim.attempt
+      && resumedBetaTask.attemptId === betaClaim.attempt_id)
 
   let unsafeCaptainTakeoverRejected = false
   try {
@@ -235,6 +327,9 @@ try {
   await call('agent_teams_update_task', {
     task_id: t2.task_id, status: 'completed', output: 'beta result', attempt_id: betaClaim.attempt_id,
   }, beta)
+  check('resumed member completes with the original parked capability',
+    (await task(t2.task_id))?.status === 'completed'
+      && (await task(t2.task_id))?.attemptId === betaClaim.attempt_id)
   publishStatus(beta, 'idle')
   publishStatus(gamma, 'idle')
   await new Promise(resolve => setTimeout(resolve, 20))
@@ -275,8 +370,8 @@ try {
   check('removing a member revokes and redispatches its unfinished task',
     afterRemoval?.members.find(member => member.name === 'alpha')?.status === 'removed'
       && recovered?.assignee !== 'alpha')
-  check('removing a member removes its continuable catalog entry',
-    (await ctx.subagents.listChildren(captain.id)).every(child => child.id !== alpha.id))
+  check('removing a member preserves its catalog entry for transcript history',
+    (await ctx.subagents.listChildren(captain.id)).some(child => child.id === alpha.id))
   let removedFollowupRejected = false
   const deliveriesBeforeRemovedFollowup = deliveries.length
   try {
@@ -397,11 +492,11 @@ try {
     archivedSnapshot?.members.length === 3
       && ['alpha', 'beta', 'gamma'].every(name => archivedSnapshot.members.some(member => member.name === name))
       && archivedSnapshot.members.every(member => member.activity === 'idle'))
-  check('team shutdown retires live, cold, and previously removed members',
+  check('team shutdown keeps retired members catalog-visible for historical transcripts',
     (await ctx.subagents.listChildren(captain.id))
       .filter(child => child.kind === 'child'
         && child.mode === 'continuable'
-        && child.label.startsWith('agent-teams:')).length === 0)
+        && child.label.startsWith('agent-teams:')).length === 3)
   let coldFollowupRejected = false
   const deliveriesBeforeColdFollowup = deliveries.length
   try {

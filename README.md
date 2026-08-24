@@ -22,6 +22,10 @@ Ask in natural language. The plugin provides the team protocol, ten coordination
   <img src="./assets/ui.png" width="100%" alt="DeepSeek Harness conversation with the AgentTeams live activity panel, members, tasks, dependencies, and reports">
 </p>
 
+## Releases
+
+Read the [latest release notes](https://github.com/NanmiCoder/dsh-agent-teams/releases/latest) or browse the [complete release history](https://github.com/NanmiCoder/dsh-agent-teams/releases). The same Markdown notes are included in the npm package under `release-notes/`.
+
 ## Why AgentTeams?
 
 | Capability | What it changes |
@@ -32,6 +36,8 @@ Ask in natural language. The plugin provides the team protocol, ten coordination
 | **Automatic reuse and safe takeover** | Idle members claim the next ready task; reassignment revokes stale attempts before new work starts, and cold recovery retries stranded open attempts. |
 | **Direct messaging** | Members send durable mailbox messages directly to teammates or the captain—no relay required. |
 | **Live activity panel** | The Web UI combines segmented progress, a collapsible roster, and an interactive task DAG; completed archives retain their full member and task history. |
+
+The conversation card and activity panel use Harness's official locale service. They follow live language changes between English and Simplified Chinese—including status labels, dynamic summaries, controls, archive markers, and accessibility text—without a page reload or a separate plugin setting.
 
 ## Install
 
@@ -46,7 +52,7 @@ Ask in natural language. The plugin provides the team protocol, ten coordination
 ### npm
 
 ```sh
-dsh plugin --profile web add @nanmicoder/dsh-agent-teams
+dsh plugin --profile web add @nanmicoder/dsh-agent-teams@latest
 dsh plugin --profile web add dsh-better-sidebar
 ```
 
@@ -78,13 +84,35 @@ Then ask for a team directly:
 1. The current session creates a team and becomes its captain.
 2. The captain adds role-specific members backed by continuable sub-agents.
 3. The goal becomes tasks with owners and explicit dependencies.
-4. The shared scheduler uses real `running / idle / ready` state to atomically claim one ready task per idle member and wake it. If an idle/ready member still owns an open task after an interrupted turn or process restart, the scheduler retries it with a fresh attempt.
+4. The shared scheduler uses real `running / idle / ready` state to atomically claim one ready task per idle member and wake it. An interrupted resident attempt stays parked and can resume through a direct message without losing its capability; after a cold process restart, the scheduler retries stranded open work with a fresh attempt.
 5. Members update with the current `attempt_id`; reassignment or captain takeover revokes the old attempt and waits for the old worker to quiesce before a new attempt starts.
 6. The captain presents the combined result, then archives the complete team record.
 
 Team state is stored under `<workspace>/.agent-teams/`; the AgentTeams tab reads that disk truth and combines it with live sub-agent activity.
 
 Member creation is zero-interaction by default: a member on the captain's current LLM route snapshots that provider, model, and reasoning effort, while a member on a requested alternative route snapshots the target model's default effort; later continuations restore the resolved snapshot. Only an explicit heterogeneous-team request (for example, “backend on provider A/model X, frontend on provider B/model Y”) supplies a member-specific `provider` + `model`; there is no per-member model or reasoning prompt.
+
+## Slash command
+
+No “use AgentTeams” phrasing required. The plugin registers the
+closed-namespace `/agent-teams` host command, so the Web GUI slash menu shows
+an `agent-teams` placeholder with an input hint: pick it (or type the
+command), describe the goal, and press Enter.
+
+```
+/agent-teams research the pricing pages of three competitors
+```
+
+The command pipeline claims the line, then preserves that exact input as an
+ordinary user follow-up so it remains visible in the main chat. The gesture
+boundary adds the deterministic activation directive at pre-step, so the
+captain protocol still starts immediately. The invocation is also durably
+logged (`command/run` / `command/done`).
+
+Surfaces without command adjudication (for example the headless CLI) get the
+same deterministic activation through a gesture boundary: any genuine user
+message starting with `/agent-teams` activates the protocol for the rest of
+the text. Mid-sentence mentions stay ordinary prose.
 
 ## Configuration
 
@@ -102,10 +130,12 @@ Defaults work without extra setup. A trusted profile can override member behavio
 
 `memberProvider` is the sub-agent runtime backend (`spawn` / `fork`), not an LLM provider. Cross-LLM-provider routing uses the optional `provider` + `model` fields of `agent_teams_add_member`; `memberModel` is only a model default for all members. A member on the captain's current provider/model inherits the captain's reasoning effort, while a changed provider or model automatically uses the target model's default. To request a particular effort, pass the optional `reasoning_effort` field — one of the target model's supported effort ids, or `"default"` to force the model's own default.
 
+`slashCommand: false` disables the deterministic `/agent-teams` activation surfaces (slash command and gesture boundary), leaving the natural-language trigger as the only entry point.
+
 ## Boundaries
 
 - One captain leads one active team at a time.
-- Idle members are automatically reused for ready work; messages that cannot be delivered live remain durable and are retried at a later status boundary.
+- Idle members with no open task are automatically reused for ready work. An idle member that still owns an open attempt is parked until messaged or explicitly reassigned; messages that cannot be delivered live remain durable and are retried at a later status boundary.
 - State is file-backed and serialized within one DSH process; concurrent processes editing the same team are not coordinated.
 - The activity panel reports persisted state as-is. Models may occasionally finish work without performing the expected task-state update.
 

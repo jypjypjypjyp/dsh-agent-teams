@@ -49,6 +49,7 @@ export function usesParallelTaskGrid<T extends RelationshipTask>(tasks: readonly
 }
 
 /**
+/**
  * Resolve the task whose dependency chain should be highlighted.
  *
  * A pinned task is an explicit user choice. Keyboard focus takes precedence

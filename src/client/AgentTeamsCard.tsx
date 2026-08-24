@@ -2,23 +2,30 @@
  * AgentTeams conversation card: the lightweight in-conversation summary for
  * one team — the captain's whale avatar and name, the member roster as
  * clickable whale avatars (opening the member's subagent transcript), and
- * an "AgentTeams" button that opens the better-sidebar AgentTeams tab when
+ * an AgentTeams button that opens the better-sidebar AgentTeams tab when
  * dsh-better-sidebar is loaded.
+ *
+ * The card shares the demand-driven activity monitor with the sidebar tab
+ * (registering its team as a monitored target), so the same live/archive
+ * snapshot keeps the card's roster current while the tab runs.
  * @module dsh-agent-teams/client/card
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ActivityTeam } from './ActivityView.tsx'
+import {
+  getActivitySnapshotsSnapshot,
+  monitorAgentTeam,
+  subscribeActivitySnapshots,
+} from './activity-monitor.ts'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
 import { LEAD_ART, memberArtUrl } from './artwork.ts'
 import css from './AgentTeamsCard.module.css'
 
 /** Navigation action injected from the plugin's own SessionsService access. */
 export interface AgentTeamsCardInjected {
-  readonly openSession: (id: SessionId) => void
-  readonly currentSessionId: () => SessionId | undefined
+  readonly openMember: (parentId: SessionId, childId: SessionId) => void
   /** Present only when dsh-better-sidebar is loaded; opens the AgentTeams tab
    *  and feeds this card's team summary so historic review can show it. */
   readonly openAgentTeamsTab?: (data: AgentTeamsCardData) => void
@@ -31,37 +38,20 @@ export type AgentTeamsCardProps =
   & AgentTeamsCardInjected
 
 /** Render one durable team as a compact conversation card. */
-export function AgentTeamsCard({ node, openSession, currentSessionId, openAgentTeamsTab }: AgentTeamsCardProps) {
+export function AgentTeamsCard({ node, openMember, sessionId, t, openAgentTeamsTab }: AgentTeamsCardProps) {
   const data = node.data as AgentTeamsCardData
-  const owner = data.captainSessionId || currentSessionId() || ''
-  const [snapshot, setSnapshot] = useState<ActivityTeam | undefined>()
+  // `conversation.chat.node` is session-scoped, so its framework-owned id is
+  // a stable owner even while another conversation becomes current.
+  const owner = data.captainSessionId || sessionId
+  const { teams, archivedTeams } = useSyncExternalStore(
+    subscribeActivitySnapshots,
+    getActivitySnapshotsSnapshot,
+  )
   useEffect(() => {
-    let cancelled = false
-    const tick = async (): Promise<void> => {
-      for (const url of ['/plugins/dsh-agent-teams/state', '/plugins/dsh-agent-teams/state?archived=1']) {
-        try {
-          const response = await fetch(url, { cache: 'no-store' })
-          if (!response.ok) continue
-          const body = (await response.json()) as { teams?: readonly ActivityTeam[] }
-          const found = Array.isArray(body.teams)
-            ? body.teams.find((team) => team.teamId === data.teamId && (owner === '' || team.captainSessionId === owner))
-            : undefined
-          if (found !== undefined) {
-            if (!cancelled) setSnapshot(found)
-            return
-          }
-        } catch {
-          // Host restarting; retry on the next poll.
-        }
-      }
-    }
-    void tick()
-    const timer = setInterval(() => { void tick() }, 1500)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
+    return monitorAgentTeam(owner, data.teamId)
   }, [data.teamId, owner])
+  const snapshot = teams.find((team) => team.teamId === data.teamId && (owner === '' || team.captainSessionId === owner))
+    ?? archivedTeams.find((team) => team.teamId === data.teamId && (owner === '' || team.captainSessionId === owner))
   const resolved = useMemo<AgentTeamsCardData>(() => ({
     ...data,
     captainSessionId: snapshot?.captainSessionId ?? owner,
@@ -73,16 +63,16 @@ export function AgentTeamsCard({ node, openSession, currentSessionId, openAgentT
       <header className={css.head}>
         <img className={css.leadAvatar} src={LEAD_ART} alt="" aria-hidden />
         <span className={css.teamName} title={resolved.teamName}>{resolved.teamName}</span>
-        <span className={css.memberCount}>{resolved.members.length} 名成员</span>
+        <span className={css.memberCount}>{t('card.memberCount', { count: resolved.members.length })}</span>
         {openAgentTeamsTab !== undefined && (
           <button
             type="button"
             className={css.panelButton}
             onClick={() => { openAgentTeamsTab(resolved) }}
-            aria-label="打开 AgentTeams"
-            title="打开 AgentTeams"
+            aria-label={t('action.openActivityPanel')}
+            title={t('action.openActivityPanel')}
           >
-            AgentTeams
+            {t('activity.panelButton')}
           </button>
         )}
       </header>
@@ -93,7 +83,9 @@ export function AgentTeamsCard({ node, openSession, currentSessionId, openAgentT
               type="button"
               key={member.id}
               className={css.member}
-              onClick={() => { if (member.id !== '') openSession(member.id as SessionId) }}
+              onClick={() => {
+                if (member.id !== '') openMember(owner as SessionId, member.id as SessionId)
+              }}
               title={member.role === '' ? member.name : `${member.name} · ${member.role}`}
             >
               {memberArtUrl(member.name, member.role) !== null ? (

@@ -1,7 +1,12 @@
 /**
  * AgentTeams activity view: session-scoped team contents rendered inside a
- * host tab (the better-sidebar AgentTeams tab). Pure presentation — polling
- * and session ownership live in the host tab wrapper.
+ * host tab (the better-sidebar AgentTeams tab). Pure presentation — polling,
+ * snapshot subscription, and session ownership live in the host tab wrapper
+ * ({@link AgentTeamsTab}). The content is aligned with the latest upstream
+ * activity surface: every label is sourced through the `agentTeams` locale
+ * namespace, navigation reaches members through the address-aware
+ * openAgentTeamMember path, and team/task shapes are the shared
+ * activity-monitor types.
  * @module dsh-agent-teams/client/activity-view
  */
 
@@ -17,52 +22,10 @@ import {
   usesParallelTaskGrid,
 } from './activity-model.ts'
 import { ACTION_ART, LEAD_ART, memberArtUrl } from './artwork.ts'
+import type { ActivityMember, ActivityTask, ActivityTeam } from './activity-monitor.ts'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
+import type { AgentTeamsLocaleKey, AgentTeamsTranslate } from './locales.ts'
 import css from './ActivityView.module.css'
-
-/** One member row of a host snapshot. */
-export interface ActivityMember {
-  readonly id: string
-  readonly name: string
-  readonly role: string
-  readonly status?: 'idle' | 'working' | 'removed'
-  readonly activity: 'working' | 'idle' | 'unknown'
-  readonly progress: number
-  readonly done: number
-  readonly total: number
-  readonly currentTask: string
-  readonly unread: number
-}
-
-/** One task row of a host snapshot. */
-export interface ActivityTask {
-  readonly id: string
-  readonly subject: string
-  readonly status: string
-  readonly state: 'blocked' | 'open' | 'running' | 'completed'
-  readonly assignee: string
-  readonly dependencies: readonly string[]
-  readonly depth: number
-}
-
-/** One captain-inbox preview row. */
-export interface ActivityMessage {
-  readonly from: string
-  readonly content: string
-}
-
-/** One team snapshot (mirrors the host TeamActivitySnapshot). */
-export interface ActivityTeam {
-  readonly workspace: string
-  readonly teamId: string
-  readonly name: string
-  readonly description?: string
-  readonly captainSessionId: string
-  readonly members: readonly ActivityMember[]
-  readonly tasks: readonly ActivityTask[]
-  readonly messageCount: number
-  readonly captainInbox: readonly ActivityMessage[]
-}
 
 /** Initial-letter fallback for unmatched roles. */
 function memberInitial(name: string): string {
@@ -91,17 +54,22 @@ function accentOf(id: string): string {
 
 /** Badge text follows the raw task status (finer than the 4 visual states):
  * claimed/pending/failed/cancelled keep their own labels and colors. */
-const TASK_STATUS_LABEL: Record<string, string> = {
-  pending: '待领取',
-  claimed: '已认领',
-  in_progress: '进行中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
+const TASK_STATUS_LABEL: Record<string, AgentTeamsLocaleKey> = {
+  pending: 'task.status.pending',
+  claimed: 'task.status.claimed',
+  in_progress: 'task.status.inProgress',
+  completed: 'task.status.completed',
+  failed: 'task.status.failed',
+  cancelled: 'task.status.cancelled',
 }
 
-function taskStatusLabel(status: string): string {
-  return TASK_STATUS_LABEL[status] ?? status
+function taskStatusLabel(status: string, t: AgentTeamsTranslate): string {
+  const key = TASK_STATUS_LABEL[status]
+  return key === undefined ? status : t(key)
+}
+
+function formatTaskIds(ids: readonly string[], t: AgentTeamsTranslate): string {
+  return ids.join(t('format.listSeparator'))
 }
 
 /** Badge/bar coloring key: visual state, widened for terminal statuses. */
@@ -129,37 +97,45 @@ function WorkGlyph({ active }: { readonly active: boolean }) {
   )
 }
 
-
-function memberStateLabel(member: ActivityMember, tasks: readonly ActivityTask[], historic: boolean): string {
+function memberStateLabel(
+  member: ActivityMember,
+  tasks: readonly ActivityTask[],
+  historic: boolean,
+  t: AgentTeamsTranslate,
+): string {
   const owned = tasks.filter((task) => task.assignee === member.name)
-  if (member.activity === 'working') return '工作中'
-  // Persistent status says work was claimed, but the live agent registry does
-  // not report an active session (process finished/died, or not yet picked up
-  // by the activity sampler). Distinguish "claimed" from actually running.
-  if (member.status === 'working') return '已认领'
-  if (owned.some((task) => task.status === 'failed')) return '有失败'
-  if (owned.some((task) => task.state === 'blocked')) return '等待'
-  if (owned.length > 0 && owned.every((task) => task.status === 'completed')) return '已交付'
-  if (member.status === 'removed') return historic ? '已离队' : '已移除'
-  if (owned.length > 0) return '待执行'
-  return '待派工'
+  if (member.activity === 'working') return t('member.state.working')
+  if (owned.some((task) => task.status === 'failed')) return t('member.state.failed')
+  if (owned.some((task) => task.state === 'blocked')) return t('member.state.waiting')
+  if (owned.length > 0 && owned.every((task) => task.status === 'completed')) return t('member.state.delivered')
+  if (member.status === 'removed') return t(historic ? 'member.state.left' : 'member.state.removed')
+  if (owned.length > 0) return t('member.state.pending')
+  return t('member.state.unassigned')
 }
 
-function memberStatusText(member: ActivityMember, tasks: readonly ActivityTask[]): string {
+function memberStatusText(
+  member: ActivityMember,
+  tasks: readonly ActivityTask[],
+  t: AgentTeamsTranslate,
+): string {
   const owned = tasks.filter((task) => task.assignee === member.name)
   const current = owned.find((task) => task.id === member.currentTask)
   const blocked = owned.find((task) => task.state === 'blocked')
-  if (member.activity === 'working' && current !== undefined) return `正在执行 ${current.id}`
-  if (member.activity === 'working') return '正在处理已派任务'
-  if (member.status === 'working') return current !== undefined ? `已认领 ${current.id}` : '任务已认领，等待执行'
+  if (member.activity === 'working' && current !== undefined) return t('member.status.executing', { taskId: current.id })
+  if (member.activity === 'working') return t('member.status.working')
   if (blocked !== undefined) {
     const dependency = tasks.find((task) => blocked.dependencies.includes(task.id) && task.state !== 'completed')
-    if (dependency !== undefined) return `等待 ${dependency.id} · ${dependency.assignee || '待认领'}`
-    return '等待前置任务'
+    if (dependency !== undefined) {
+      return t('member.status.waitingOn', {
+        taskId: dependency.id,
+        assignee: dependency.assignee || t('task.assignee.unclaimed'),
+      })
+    }
+    return t('member.status.waitingPrerequisite')
   }
-  if (member.total === 0) return '等待队长派工'
-  if (member.done === member.total) return '任务已交付'
-  return member.activity === 'idle' ? '待继续执行' : '状态未知'
+  if (member.total === 0) return t('member.status.waitingAssignment')
+  if (member.done === member.total) return t('member.status.delivered')
+  return t(member.activity === 'idle' ? 'member.status.idle' : 'member.status.unknown')
 }
 
 function compactTaskLabel(subject: string): string {
@@ -168,49 +144,55 @@ function compactTaskLabel(subject: string): string {
   return head.length > 18 ? `${head.slice(0, 17)}…` : head
 }
 
-function taskSummary(team: ActivityTeam): string {
+function taskSummary(team: ActivityTeam, t: AgentTeamsTranslate): string {
   const completed = team.tasks.filter((task) => task.status === 'completed')
   const running = team.tasks.filter((task) => task.state === 'running')
   const blocked = team.tasks.filter((task) => task.state === 'blocked')
   const ready = team.tasks.filter((task) => task.state === 'open' && task.status !== 'completed')
-  if (team.tasks.length === 0) return '等待队长拆解任务'
-  if (completed.length === team.tasks.length) return `全部 ${completed.length} 项任务已交付`
+  if (team.tasks.length === 0) return t('task.summary.waitingBreakdown')
+  if (completed.length === team.tasks.length) return t('task.summary.allDelivered', { count: completed.length })
   if (blocked.length > 0 && running.length > 0) {
-    return `${blocked.slice(0, 3).map((task) => task.id).join('、')}${blocked.length > 3 ? ` 等 ${blocked.length} 项` : ''} 等待前置，其余已开工`
+    return t('task.summary.blockedAndRunning', {
+      tasks: formatTaskIds(blocked.slice(0, 3).map((task) => task.id), t),
+      more: blocked.length > 3 ? t('task.summary.more', { count: blocked.length - 3 }) : '',
+    })
   }
-  if (running.length > 0) return `${running.map((task) => task.id).join('、')} 正在执行`
-  if (ready.length > 0) return `${ready.map((task) => task.id).join('、')} 已就绪待开工`
-  if (blocked.length > 0) return `${blocked.map((task) => task.id).join('、')} 等待前置`
-  return '等待下一轮调度'
+  if (running.length > 0) return t('task.summary.running', { tasks: formatTaskIds(running.map((task) => task.id), t) })
+  if (ready.length > 0) return t('task.summary.ready', { tasks: formatTaskIds(ready.map((task) => task.id), t) })
+  if (blocked.length > 0) return t('task.summary.blocked', { tasks: formatTaskIds(blocked.map((task) => task.id), t) })
+  return t('task.summary.waitingSchedule')
 }
 
-function ProgressOverview({ team }: { readonly team: ActivityTeam }) {
+function ProgressOverview({ team, t }: { readonly team: ActivityTeam; readonly t: AgentTeamsTranslate }) {
   const running = team.tasks.filter((task) => task.state === 'running').length
   const blocked = team.tasks.filter((task) => task.state === 'blocked').length
   const completed = team.tasks.filter((task) => task.status === 'completed').length
   const summaryTone = blocked > 0 ? 'warning' : completed === team.tasks.length && team.tasks.length > 0 ? 'completed' : 'running'
   return (
-    <section className={css.progressOverview} aria-label="团队总进度" data-progress-summary>
-      <span className={css.progressTitle}>总进度</span>
+    <section className={css.progressOverview} aria-label={t('progress.aria')} data-progress-summary>
+      <span className={css.progressTitle}>{t('progress.title')}</span>
       {team.tasks.length > 0 ? (
         <span className={css.progressSegments} aria-hidden>
           {team.tasks.map((task) => <span key={task.id} data-state={taskTone(task.state, task.status)} />)}
         </span>
       ) : <span className={css.progressEmpty} />}
       <span className={css.progressLegend}>
-        <span data-state="running">■ 进行中 {running}</span>
-        <span data-state="blocked">■ 等待依赖 {blocked}</span>
-        <span data-state="completed">■ 已交付 {completed}</span>
+        <span data-state="running">{t('progress.running', { count: running })}</span>
+        <span data-state="blocked">{t('progress.blocked', { count: blocked })}</span>
+        <span data-state="completed">{t('progress.delivered', { count: completed })}</span>
       </span>
       <span className={css.progressSummary} data-state={summaryTone}>
         <span className={css.progressSummaryDot} />
-        <span>{taskSummary(team)}</span>
+        <span>{taskSummary(team, t)}</span>
       </span>
     </section>
   )
 }
 
-function DependencyMap({ tasks }: { readonly tasks: readonly ActivityTask[] }) {
+function DependencyMap({ tasks, t }: {
+  readonly tasks: readonly ActivityTask[]
+  readonly t: AgentTeamsTranslate
+}) {
   const [open, setOpen] = useState(true)
   const [hoverTaskId, setHoverTaskId] = useState<string | null>(null)
   const [keyboardTaskId, setKeyboardTaskId] = useState<string | null>(null)
@@ -257,14 +239,14 @@ function DependencyMap({ tasks }: { readonly tasks: readonly ActivityTask[] }) {
   ))
   const dependents = tasks.filter((task) => task.dependencies.includes(detailTask.id))
   return (
-    <section className={css.dependencySection} aria-label="任务依赖链" data-dependency-map>
+    <section className={css.dependencySection} aria-label={t('dependency.aria')} data-dependency-map>
       <header className={css.sectionHead}>
         <button type="button" className={css.sectionToggleTitle} onClick={() => { setOpen((current) => !current) }} aria-expanded={open}>
-          <Chevron open={open} /><IconBranchOutline16 /> {parallel ? '并行任务' : '任务依赖'}
+          <Chevron open={open} /><IconBranchOutline16 /> {t(parallel ? 'dependency.parallel' : 'dependency.title')}
         </button>
         <span className={css.sectionHint}>{pinnedTaskId === null
-          ? parallel ? '无前后依赖 · 点击查看详情' : '悬停高亮依赖链 · 点击固定'
-          : `${pinnedTaskId} 已固定 · Esc 取消`}</span>
+          ? t(parallel ? 'dependency.hint.parallel' : 'dependency.hint.chain')
+          : t('dependency.hint.pinned', { taskId: pinnedTaskId })}</span>
       </header>
       {open && (
         <>
@@ -303,7 +285,7 @@ function DependencyMap({ tasks }: { readonly tasks: readonly ActivityTask[] }) {
                   <span className={css.dagNodeHead}><span className={css.dagNodeDot} />{task.id}</span>
                   <span className={css.dagNodeLabel}>{compactTaskLabel(task.subject)}</span>
                   {task.state === 'running' && (
-                    <span className={css.dagRunningState} aria-label="运行中">
+                    <span className={css.dagRunningState} aria-label={t('task.runningAria')}>
                       <WorkGlyph active />
                     </span>
                   )}
@@ -315,18 +297,20 @@ function DependencyMap({ tasks }: { readonly tasks: readonly ActivityTask[] }) {
             <span className={css.taskDetailHead}>
               <span className={css.taskDetailId}>{detailTask.id}</span>
               <span className={css.taskDetailSubject} title={detailTask.subject}>{detailTask.subject.replace(/^开发\s*/u, '')}</span>
-              <span className={css.taskDetailBadge} data-state={taskTone(detailTask.state, detailTask.status)}>{taskStatusLabel(detailTask.status)}</span>
+              <span className={css.taskDetailBadge} data-state={taskTone(detailTask.state, detailTask.status)}>{taskStatusLabel(detailTask.status, t)}</span>
             </span>
             <span className={css.taskDetailLine}>
-              {detailTask.assignee || '待认领'} · {detailTask.status === 'completed'
-                ? '已完成并交付'
+              {detailTask.assignee || t('task.assignee.unclaimed')} · {detailTask.status === 'completed'
+                ? t('task.detail.completed')
                 : detailTask.dependencies.length === 0
-                ? '无前置，可立即开工'
+                ? t('task.detail.noPrerequisite')
                 : waitingOn.length === 0
-                  ? '前置已就绪，可开工'
-                  : `等待 ${waitingOn.join('、')}`}
+                  ? t('task.detail.ready')
+                  : t('task.detail.waitingOn', { tasks: formatTaskIds(waitingOn, t) })}
             </span>
-            <span className={css.taskDetailMeta}>{dependents.length === 0 ? '无下游任务' : `完成后解锁 ${dependents.map((task) => task.id).join('、')}`}</span>
+            <span className={css.taskDetailMeta}>{dependents.length === 0
+              ? t('task.detail.noDownstream')
+              : t('task.detail.unlocks', { tasks: formatTaskIds(dependents.map((task) => task.id), t) })}</span>
           </section>
         </>
       )}
@@ -334,10 +318,11 @@ function DependencyMap({ tasks }: { readonly tasks: readonly ActivityTask[] }) {
   )
 }
 
-function TeamSection({ team, onNavigate, historic = false }: {
+function TeamSection({ team, onNavigate, t, historic = false }: {
   readonly team: ActivityTeam
   /** Navigate to a member transcript (opens the member's subagent session). */
-  readonly onNavigate: (id: SessionId) => void
+  readonly onNavigate: (parentId: SessionId, childId: SessionId) => void
+  readonly t: AgentTeamsTranslate
   readonly historic?: boolean
 }) {
   const [membersOpen, setMembersOpen] = useState(true)
@@ -349,41 +334,46 @@ function TeamSection({ team, onNavigate, historic = false }: {
     <section className={css.team} data-team-id={team.teamId}>
       <header className={css.teamHead}>
         <span className={css.teamName} title={team.name}>{team.name}</span>
-        {historic && <span className={css.historicPill}>已结束</span>}
+        {historic && <span className={css.historicPill}>{t('team.ended')}</span>}
         <span className={css.teamStats}>
-          <span data-stat="members">{team.members.length} 成员</span>
-          <span data-stat="tasks">{completedCount}/{team.tasks.length} 完成</span>
-          <span data-stat="messages">{team.messageCount} 消息</span>
+          <span data-stat="members">{t('team.stats.members', { count: team.members.length })}</span>
+          <span data-stat="tasks">{t('team.stats.completed', { completed: completedCount, total: team.tasks.length })}</span>
+          <span data-stat="messages">{t('team.stats.messages', { count: team.messageCount })}</span>
         </span>
       </header>
 
-      <section className={css.delegationSection} aria-label="队长派工关系" data-delegation-map>
+      <section className={css.delegationSection} aria-label={t('delegation.aria')} data-delegation-map>
         <div className={css.captainNode}>
           <span className={css.captainAvatar}>
             <img className={css.leadAvatar} src={LEAD_ART} alt="" aria-hidden />
           </span>
           <span className={css.captainInfo}>
             <span className={css.captainLine}>
-              <span className={css.captainName}>队长</span>
-              <span className={css.captainRole}>拆解 · 派发 · 汇总</span>
+              <span className={css.captainName}>{t('captain.name')}</span>
+              <span className={css.captainRole}>{t('captain.role')}</span>
             </span>
-            <span className={css.captainSummary}>已派发 {assignedCount} 项任务给 {team.members.length} 名成员</span>
+            <span className={css.captainSummary}>{t('captain.summary', {
+              tasks: assignedCount,
+              members: team.members.length,
+            })}</span>
           </span>
           <span className={css.captainState} data-busy={busyCount > 0}>
             <WorkGlyph active={busyCount > 0} />
-            {busyCount > 0 ? `${busyCount} 人执行中` : allCompleted ? '已收齐' : '等待回报'}
+            {busyCount > 0
+              ? t('captain.state.working', { count: busyCount })
+              : t(allCompleted ? 'captain.state.collected' : 'captain.state.waiting')}
           </span>
         </div>
 
-        <ProgressOverview team={team} />
+        <ProgressOverview team={team} t={t} />
 
         <button type="button" className={css.membersToggle} onClick={() => { setMembersOpen((current) => !current) }} aria-expanded={membersOpen} data-members-toggle>
-          <span><Chevron open={membersOpen} />成员 {team.members.length}</span>
-          <span>{membersOpen ? '收起' : '展开'}</span>
+          <span><Chevron open={membersOpen} />{t('members.toggle', { count: team.members.length })}</span>
+          <span>{t(membersOpen ? 'members.collapse' : 'members.expand')}</span>
         </button>
 
         {membersOpen && <div className={css.delegationTree}>
-          {team.members.length === 0 && <span className={css.emptyHint}>暂无成员，等待队长组建团队</span>}
+          {team.members.length === 0 && <span className={css.emptyHint}>{t('members.empty')}</span>}
           {team.members.map((member) => {
             const owned = team.tasks.filter((task) => task.assignee === member.name)
             return (
@@ -393,7 +383,11 @@ function TeamSection({ team, onNavigate, historic = false }: {
                   type="button"
                   className={css.memberRow}
                   data-activity={member.activity}
-                  onClick={() => { if (member.id !== '') onNavigate(member.id as SessionId) }}
+                  onClick={() => {
+                    if (member.id !== '') {
+                      onNavigate(team.captainSessionId as SessionId, member.id as SessionId)
+                    }
+                  }}
                 >
                   <span className={css.memberAvatar} data-unread={member.unread > 0}>
                     {memberArtUrl(member.name, member.role) !== null ? (
@@ -409,18 +403,18 @@ function TeamSection({ team, onNavigate, historic = false }: {
                       {member.role !== '' && <span className={css.memberRole}>{member.role}</span>}
                       <span className={css.memberState} data-activity={member.activity}>
                         <WorkGlyph active={member.activity === 'working'} />
-                        {memberStateLabel(member, team.tasks, historic)}
+                        {memberStateLabel(member, team.tasks, historic, t)}
                       </span>
                     </span>
-                    <span className={css.memberStatusLine}>{memberStatusText(member, team.tasks)}</span>
+                    <span className={css.memberStatusLine}>{memberStatusText(member, team.tasks, t)}</span>
                   </span>
                   <span className={css.memberCount}>{member.done}/{member.total}</span>
                 </button>
                 <div className={css.assignmentLine}>
-                  <span className={css.assignmentLabel}>队长派发</span>
+                  <span className={css.assignmentLabel}>{t('assignment.label')}</span>
                   <span className={css.assignmentTasks}>
                     {owned.length === 0
-                      ? <span className={css.taskEmpty}>暂无任务</span>
+                      ? <span className={css.taskEmpty}>{t('assignment.empty')}</span>
                       : owned.map((task) => (
                         <span key={task.id} className={css.assignmentChip} data-state={taskTone(task.state, task.status)} title={task.subject}>
                           {task.id}
@@ -434,13 +428,13 @@ function TeamSection({ team, onNavigate, historic = false }: {
         </div>}
       </section>
 
-      <DependencyMap tasks={team.tasks} />
+      <DependencyMap tasks={team.tasks} t={t} />
     </section>
   )
 }
 
 /** Legacy conversation cards may outlive their host archive. Project their
- * durable roster through the same rebuilt panel instead of a second UI. */
+ * durable roster through the same rebuilt content instead of a second UI. */
 function historicCardTeam(data: AgentTeamsCardData, owner: string): ActivityTeam {
   return {
     workspace: '',
@@ -464,39 +458,51 @@ function historicCardTeam(data: AgentTeamsCardData, owner: string): ActivityTeam
 }
 
 /** Render team contents for the current session's host tab. */
-export function ActivityView({ teams, archivedTeams, historic, currentSessionId, onNavigate }: {
+export function ActivityView({ teams, archivedTeams, historic, currentSessionId, onNavigate, t }: {
   readonly teams: readonly ActivityTeam[]
   readonly archivedTeams: readonly ActivityTeam[]
   readonly historic: ReadonlyMap<string, { data: AgentTeamsCardData; owner: string }>
   readonly currentSessionId: SessionId | undefined
-  readonly onNavigate: (id: SessionId) => void
+  readonly onNavigate: (parentId: SessionId, childId: SessionId) => void
+  readonly t: AgentTeamsTranslate
 }) {
-  const visibleTeams = teams.filter((team) => team.captainSessionId === currentSessionId)
-  const visibleArchived = archivedTeams.filter((team) => team.captainSessionId === currentSessionId)
-  const visibleHistoric = [...historic.values()].filter(({ data, owner }) =>
-    owner === currentSessionId
-      && !visibleTeams.some((live) => live.teamId === data.teamId)
-      && !visibleArchived.some((archived) => archived.teamId === data.teamId)
-  )
+  const visibleTeams = currentSessionId === undefined
+    ? []
+    : teams.filter((team) => team.captainSessionId === currentSessionId)
+  const visibleArchived = currentSessionId === undefined
+    ? []
+    : archivedTeams.filter((team) =>
+      team.captainSessionId === currentSessionId && !teams.some((live) =>
+        live.captainSessionId === currentSessionId && live.teamId === team.teamId,
+      ),
+    )
+  const visibleHistoric = currentSessionId === undefined
+    ? []
+    : [...historic.values()].filter(({ data, owner }) =>
+      owner === currentSessionId
+        && !visibleTeams.some((live) => live.teamId === data.teamId)
+        && !visibleArchived.some((archived) => archived.teamId === data.teamId),
+    )
   const count = visibleTeams.length + visibleArchived.length + visibleHistoric.length
   return (
     <div className={css.root} data-agent-teams-activity>
       {count === 0
-        ? <span className={css.emptyHint}>暂无团队活动</span>
+        ? <span className={css.emptyHint}>{t('activity.empty')}</span>
         : (
           <>
             {visibleTeams.map((team) => (
-              <TeamSection key={team.teamId} team={team} onNavigate={onNavigate} />
+              <TeamSection key={team.teamId} team={team} onNavigate={onNavigate} t={t} />
             ))}
             {visibleArchived.map((team) => (
               <div key={`${team.captainSessionId}:${team.teamId}`} data-team-id={team.teamId} data-historic className={css.archivedWrap}>
-                <TeamSection team={team} onNavigate={onNavigate} historic />
+                <span className={css.archiveLabel}>{t('archive.label')}</span>
+                <TeamSection team={team} onNavigate={onNavigate} t={t} historic />
               </div>
             ))}
             {visibleHistoric.map(({ data: team, owner }) => {
               const teamKey = `${owner}:${team.teamId}`
               return (
-                <TeamSection key={teamKey} team={historicCardTeam(team, owner)} onNavigate={onNavigate} historic />
+                <TeamSection key={teamKey} team={historicCardTeam(team, owner)} onNavigate={onNavigate} t={t} historic />
               )
             })}
           </>
@@ -504,4 +510,3 @@ export function ActivityView({ teams, archivedTeams, historic, currentSessionId,
     </div>
   )
 }
-

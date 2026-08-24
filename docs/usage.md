@@ -11,7 +11,7 @@
 | `ctx.tools` 注册表 | 注册 10 个 `agent_teams_*` 工具（与 `tool-workflow` 同一注册路径） |
 | `ctx.subagents.startContinuable()` | 创建成员：durable 可续聊子代理，带成员 persona |
 | `ctx.subagents.followup()` | 唤醒收件成员（消息进入其下一轮次） |
-| `ctx.subagents.listChildren()` + `ctx.agents` | 前者发现 durable 成员，后者提供真实 `running / idle / ready` 活动状态 |
+| 持久化团队成员表 + `ctx.agents` | 前者保存 durable 成员身份，后者提供真实 `running / idle / ready` 活动状态（不依赖易变的子代理目录投影） |
 | `agent/status` | 成员进入 idle 后触发共享任务池自动续领与下一轮唤醒 |
 | `ctx.systemPrompt.section()` | 注册"AgentTeams 使用策略"提示段 |
 | Web server 路由注册 | 活动面板数据路由 `/plugins/dsh-agent-teams/state` + 鲸鱼图片静态服务（`webServer`/`httpServer` 双键兼容，见下） |
@@ -25,6 +25,7 @@
 
 - **better-sidebar AgentTeams tab**：需要安装 `dsh-better-sidebar`（v0.13+）才会显示。每个团队展示队长、分段总进度、状态统计、可折叠成员树和紧凑任务 DAG。DAG 以真实 SVG 曲线连接依赖，悬停或键盘聚焦可预览完整上下游链，点击固定，`Esc` 取消；选中节点会显示负责人、未满足前置和下游解锁信息。成员行展示职业头像、角色、实时状态和任务标签，点击可打开成员子会话；tab 徽标显示当前会话团队数。
 - **小鲸鱼形象**：队长/成员头像为 DeepSeek 小鲸鱼职业插画（`assets/agent-teams/`，8 角色 + 6 动作），按角色关键词匹配；状态动作小图随成员状态切换并带动画（工作浮动 / 空闲呼吸 / 未知思考），未读消息头像外圈光晕；遵循 `prefers-reduced-motion`。
+- **跟随宿主语言**：插件注册独立的 `agentTeams` locale namespace，翻译函数由活动内容与卡片经该 namespace 获取；对话卡片、活动面板、动态状态摘要、历史标识和无障碍文案随 Harness 在简体中文/英文之间切换。
 - **会话跟随**：tab 只显示**当前会话**的团队（按 captainSessionId 匹配）；切换会话时徽标与内容跟随当前会话。
 - **对话流卡片**：团队创建时对话流出现轻量卡片（成员一览、点击跳转成员会话、"AgentTeams"按钮打开 better-sidebar 的 AgentTeams tab；未安装 better-sidebar 时按钮隐藏）。
 - **历史复盘**：`agent_teams_delete` 将团队**归档保留**（`<stateRoot>/archive/<teamId>/`，成员、任务、依赖图和邮箱完整留存）；结束团队时成员会被标记为 removed，但历史快照仍保留整支队伍，并以空闲/已交付状态展示，避免任务仍在而成员消失。打开历史会话点卡片即可恢复同一套成员树与 DAG。
@@ -76,7 +77,7 @@
 
 ## 使用协议
 
-插件提示段会指导模型按协议执行：建团队 → 按角色拉成员 → 拆任务并声明依赖 → 共享调度器自动领取并唤醒空闲成员 → 队长监控/引导 → 阻塞时先安全转派或接管 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息，无需队长中转。成员若在中断、异常结束或进程重启后变成 `idle/ready`，但磁盘上仍持有 `claimed/in_progress` 任务，调度器会撤销旧 capability、生成新 attempt 并重新唤醒同一成员。
+插件提示段会指导模型按协议执行：建团队 → 按角色拉成员 → 拆任务并声明依赖 → 共享调度器自动领取并唤醒空闲成员 → 队长监控/引导 → 阻塞时先安全转派或接管 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息，无需队长中转。驻留成员在中断或正常结束一轮后若仍持有 `claimed/in_progress` 任务，该 attempt 会停驻；队长通过 `agent_teams_send_message` 可让原成员沿用同一 capability 继续，只有显式重试/转派/接管才会撤销它。进程冷重启后，调度器仍会为无法确认驻留状态的开放任务生成新 attempt 并恢复。若用户要求每名成员都产出或上报，队长必须为每人创建任务或发送明确指令，不能等待未分配工作的成员凭空完成职责。
 
 ## 已知限制
 

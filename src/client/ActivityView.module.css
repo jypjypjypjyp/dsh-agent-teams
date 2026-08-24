@@ -139,8 +139,7 @@
   box-sizing: border-box;
   border: 1px solid var(--dsw-alias-line-strong);
   border-radius: 50%;
-  object-fit: cover;
-  background: #0b1d33;
+  object-fit: contain;
 }
 
 .captainInfo,
@@ -468,10 +467,10 @@
   border: 1px solid var(--dsw-alias-state-business-primary);
   border-radius: 50%;
   content: '';
-  animation: agentTeamsRing 1.5s ease-out infinite;
+  animation: agentTeamsUnreadPulse 1.5s ease-out infinite;
 }
 
-@keyframes agentTeamsRing {
+@keyframes agentTeamsUnreadPulse {
   0% { opacity: 0.82; transform: scale(0.94); }
   75%, 100% { opacity: 0; transform: scale(1.18); }
 }
@@ -495,8 +494,7 @@
   box-sizing: border-box;
   border: 2px solid var(--dsw-alias-bg-module);
   border-radius: 50%;
-  object-fit: cover;
-  background: #0b1d33;
+  object-fit: contain;
 }
 
 .stateArt[data-activity='working'] {
@@ -902,14 +900,17 @@
   gap: 3px;
 }
 
-.archivedWrap::before {
+.archivedWrap {
+  min-width: 0;
+}
+
+.archiveLabel {
   display: block;
   padding: 5px 14px 0;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 600;
   line-height: 14px;
-  content: '已结束 · 历史归档';
 }
 
 @media (prefers-reduced-motion: reduce) {

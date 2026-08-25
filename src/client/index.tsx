@@ -25,8 +25,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Required services: conversation nodes, slots, sessions navigation, and locale. */
-export const inject = ['conversationEvents', 'slots', 'sessions', 'locale']
+/** Required services: conversation nodes, slots, sessions navigation, locale, and the better-sidebar tab registry. */
+export const inject = ['conversationEvents', 'slots', 'sessions', 'locale', 'betterSidebar']
 
 /** The replayed user message is the canonical transcript entry. */
 function HiddenAgentTeamsCommand(): null {
